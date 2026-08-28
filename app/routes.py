@@ -1,8 +1,7 @@
 """Versioned API routers for platform modules."""
 from __future__ import annotations
-import base64
 import time
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from app.schemas import (AuthRequest, ChatRequest, DocumentCreate, EvaluationRequest,
                          GenerateRequest, ResumeRequest, ResearchRequest, SearchRequest,
                          WorkflowRequest)
@@ -23,6 +22,8 @@ from app.storage import (
     update_document,
     usage_summary,
 )
+from app.dependencies import current_user
+from app.security import AuthenticationError, create_access_token
 
 api = APIRouter(prefix="/api")
 auth = APIRouter(prefix="/auth", tags=["auth"])
@@ -39,8 +40,11 @@ def register(request: AuthRequest):
         raise HTTPException(409, "An account with this email already exists.")
     except StorageUnavailable as exc:
         raise HTTPException(503, str(exc))
-    return {"user": user,
-            "token": base64.urlsafe_b64encode(f"{user['id']}:{user['email']}".encode()).decode()}
+    try:
+        token = create_access_token(user)
+    except AuthenticationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {"user": user, "token": token}
 
 
 @auth.post("/login")
@@ -51,18 +55,24 @@ def login(request: AuthRequest):
         raise HTTPException(503, str(exc))
     if not user or not verify_password(request.password, user["password_hash"]):
         raise HTTPException(401, "Invalid email or password.")
-    return {"user": {"id": user["id"], "email": user["email"], "name": user["name"]},
-            "token": base64.urlsafe_b64encode(f"{user['id']}:{user['email']}".encode()).decode()}
+    safe_user = {"id": user["id"], "email": user["email"], "name": user["name"]}
+    try:
+        token = create_access_token(safe_user)
+    except AuthenticationError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {"user": safe_user, "token": token}
 
 
 @knowledge.post("/documents")
-def upload_document(request: DocumentCreate):
-    item = add_document(request.name, request.text, request.collection, len(chunks(request.text)))
+def upload_document(request: DocumentCreate, user: dict | None = Depends(current_user)):
+    item = add_document(request.name, request.text, request.collection, len(chunks(request.text)),
+                        user["id"] if user else None)
     return {"document": item}
 
 
 @knowledge.post("/documents/upload")
-async def upload_document_file(file: UploadFile = File(...), collection: str = "default"):
+async def upload_document_file(file: UploadFile = File(...), collection: str = "default",
+                               user: dict | None = Depends(current_user)):
     if not file.filename:
         raise HTTPException(400, "A document file is required.")
     if not file.filename.lower().endswith((".pdf", ".txt", ".md", ".json", ".csv", ".docx")):
@@ -75,26 +85,29 @@ async def upload_document_file(file: UploadFile = File(...), collection: str = "
         text = extract_document_text(file.filename, content)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {"document": add_document(file.filename, text, collection, len(chunks(text)))}
+    return {"document": add_document(file.filename, text, collection, len(chunks(text)),
+                                     user["id"] if user else None)}
 
 
 @knowledge.get("/documents")
-def get_documents(collection: str = "default"):
-    return {"documents": list_documents(collection)}
+def get_documents(collection: str = "default", user: dict | None = Depends(current_user)):
+    return {"documents": list_documents(collection, user["id"] if user else None)}
 
 
 @knowledge.get("/documents/{document_id}")
-def get_document_endpoint(document_id: str):
-    document = get_document(document_id)
+def get_document_endpoint(document_id: str, user: dict | None = Depends(current_user)):
+    document = get_document(document_id, user["id"] if user else None)
     if document is None:
         raise HTTPException(404, "Document not found.")
     return {"document": document}
 
 
 @knowledge.put("/documents/{document_id}")
-def update_document_endpoint(document_id: str, request: DocumentCreate):
+def update_document_endpoint(document_id: str, request: DocumentCreate,
+                             user: dict | None = Depends(current_user)):
     document = update_document(
-        document_id, request.name, request.text, request.collection, len(chunks(request.text))
+        document_id, request.name, request.text, request.collection, len(chunks(request.text)),
+        user["id"] if user else None
     )
     if document is None:
         raise HTTPException(404, "Document not found.")
@@ -102,15 +115,16 @@ def update_document_endpoint(document_id: str, request: DocumentCreate):
 
 
 @knowledge.delete("/documents/{document_id}")
-def delete_document_endpoint(document_id: str):
-    if not delete_document(document_id):
+def delete_document_endpoint(document_id: str, user: dict | None = Depends(current_user)):
+    if not delete_document(document_id, user["id"] if user else None):
         raise HTTPException(404, "Document not found.")
     return {"deleted": True, "id": document_id}
 
 
 @knowledge.post("/search")
-def search_documents(request: SearchRequest):
-    return {"results": retrieve(request.query, request.collection, request.limit)}
+def search_documents(request: SearchRequest, user: dict | None = Depends(current_user)):
+    return {"results": retrieve(request.query, request.collection, request.limit,
+                                user["id"] if user else None)}
 
 
 @tools.post("/resume/analyze")
@@ -144,24 +158,29 @@ def content_generate(request: GenerateRequest):
 
 
 @tools.post("/research")
-def research_endpoint(request: ResearchRequest):
+def research_endpoint(request: ResearchRequest, user: dict | None = Depends(current_user)):
     return research(request.question, request.depth)
 
 
 @tools.post("/workflows/run")
-def workflow_endpoint(request: WorkflowRequest):
-    return run_workflow(request.name, request.steps, request.input)
+def workflow_endpoint(request: WorkflowRequest, user: dict | None = Depends(current_user)):
+    try:
+        return run_workflow(request.name, request.steps, request.input)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @tools.post("/evaluations")
-def evaluation_endpoint(request: EvaluationRequest):
+def evaluation_endpoint(request: EvaluationRequest, user: dict | None = Depends(current_user)):
     score = evaluate(request.actual, request.expected)
-    return {"evaluation": save_evaluation(request.prompt, request.expected, request.actual, score), "score": score}
+    return {"evaluation": save_evaluation(request.prompt, request.expected, request.actual, score,
+                                          user["id"] if user else None), "score": score}
 
 
 @observability.get("/metrics")
-def metrics():
-    return {"usage": usage_summary(), "features": ["chat", "rag", "resume", "content", "research", "workflows", "evaluations"]}
+def metrics(user: dict | None = Depends(current_user)):
+    return {"usage": usage_summary(user["id"] if user else None),
+            "features": ["chat", "rag", "resume", "content", "research", "workflows", "evaluations"]}
 
 
 api.include_router(auth)

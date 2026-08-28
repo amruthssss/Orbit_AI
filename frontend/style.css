@@ -207,6 +207,10 @@ label input, label textarea, label select { display: block; margin-top: 7px; fon
 .chat-composer button:not(:disabled):hover { background: var(--accent-strong); }
 .fine-print { margin: 10px 0 0; color: #4f5c70; text-align: center; font: 10px "DM Mono"; }
 .mobile-menu { display: none; color: var(--muted); border: 0; background: transparent; font-size: 18px; }
+ .auth-shell { display: grid; place-items: center; min-height: 100vh; padding: 24px; background: var(--bg); }
+ .auth-shell .card { width: min(100%, 420px); }
+ .auth-shell h1 { margin: 0 0 24px; }
+ .auth-shell label { display: block; margin: 14px 0; }
 
 @media (max-width: 760px) {
   .sidebar { position: fixed; z-index: 5; top: 0; bottom: 0; left: -270px; transition: left .22s ease; box-shadow: 14px 0 40px #0008; }

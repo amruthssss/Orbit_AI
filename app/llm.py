@@ -39,25 +39,30 @@ except Exception as exc:  # Optional provider must never prevent local startup.
     logger.error("Gemini client initialization failed (%s).", provider_init_error)
 
 
-def _history(session_id: str, message: str) -> list[dict]:
-    if not conversations[session_id] and storage_status() == "ready":
-        conversations[session_id].extend(
+def _conversation_key(session_id: str, owner_id: str | None) -> str:
+    return f"{owner_id}:{session_id}" if owner_id else session_id
+
+
+def _history(session_id: str, message: str, owner_id: str | None = None) -> list[dict]:
+    key = _conversation_key(session_id, owner_id)
+    if not conversations[key] and storage_status() == "ready":
+        conversations[key].extend(
             {"role": item["role"], "parts": [{"text": item["content"]}]}
-            for item in list_messages(session_id, MAX_HISTORY_MESSAGES)
+            for item in list_messages(session_id, MAX_HISTORY_MESSAGES, owner_id)
         )
-    return conversations[session_id][-MAX_HISTORY_MESSAGES:] + [
+    return conversations[key][-MAX_HISTORY_MESSAGES:] + [
         {"role": "user", "parts": [{"text": message}]}
     ]
 
 
-def _save_exchange(session_id: str, message: str, answer: str) -> None:
-    conversations[session_id].extend([
+def _save_exchange(session_id: str, message: str, answer: str, owner_id: str | None = None) -> None:
+    conversations[_conversation_key(session_id, owner_id)].extend([
         {"role": "user", "parts": [{"text": message}]},
         {"role": "model", "parts": [{"text": answer}]},
     ])
     if storage_status() == "ready":
-        save_message(session_id, "user", message)
-        save_message(session_id, "model", answer)
+        save_message(session_id, "user", message, owner_id)
+        save_message(session_id, "model", answer, owner_id)
 
 
 def _fallback(message: str) -> str:
@@ -66,10 +71,10 @@ def _fallback(message: str) -> str:
             "Connect GEMINI_API_KEY to enable model-backed answers.")
 
 
-def _grounded_message(message: str) -> str:
+def _grounded_message(message: str, owner_id: str | None = None) -> str:
     if storage_status() != "ready":
         return message
-    matches = retrieve(message, limit=5)
+    matches = retrieve(message, limit=5, owner_id=owner_id)
     if not matches:
         return message
     context = "\n\n".join(
@@ -101,7 +106,7 @@ def _raise_provider_error(exc: Exception) -> None:
     raise LLMProviderError("Gemini request failed. Please try again later.") from exc
 
 
-def generate_response(session_id: str, message: str) -> str:
+def generate_response(session_id: str, message: str, owner_id: str | None = None) -> str:
     valid, reason = check_input(message)
     if not valid:
         raise GuardrailViolation(reason)
@@ -113,14 +118,14 @@ def generate_response(session_id: str, message: str) -> str:
             answer = _fallback(message)
         else:
             response = client.models.generate_content(
-                model=MODEL_NAME, contents=_history(session_id, _grounded_message(message)),
+                model=MODEL_NAME, contents=_history(session_id, _grounded_message(message, owner_id), owner_id),
                 config={"system_instruction": SYSTEM_PROMPT, "temperature": 0.3, "max_output_tokens": 1000},
             )
             answer = response.text or ""
         valid, reason = check_output(answer)
         if not valid:
             raise GuardrailViolation(reason)
-        _save_exchange(session_id, message, answer)
+        _save_exchange(session_id, message, answer, owner_id)
         logger.info("chat completed session=%s latency_ms=%.1f", session_id, (time.perf_counter() - start) * 1000)
         return answer
     except GuardrailViolation:
@@ -129,7 +134,7 @@ def generate_response(session_id: str, message: str) -> str:
         _raise_provider_error(exc)
 
 
-def generate_stream(session_id: str, message: str):
+def generate_stream(session_id: str, message: str, owner_id: str | None = None):
     valid, reason = check_input(message)
     if not valid:
         raise GuardrailViolation(reason)
@@ -139,12 +144,12 @@ def generate_stream(session_id: str, message: str):
         answer = _fallback(message)
         for word in answer.split(" "):
             yield word + " "
-        _save_exchange(session_id, message, answer)
+        _save_exchange(session_id, message, answer, owner_id)
         return
     full = ""
     try:
         response = client.models.generate_content_stream(
-            model=MODEL_NAME, contents=_history(session_id, _grounded_message(message)),
+            model=MODEL_NAME, contents=_history(session_id, _grounded_message(message, owner_id), owner_id),
             config={"system_instruction": SYSTEM_PROMPT, "temperature": 0.3, "max_output_tokens": 1000},
         )
         for chunk in response:
@@ -155,15 +160,18 @@ def generate_stream(session_id: str, message: str):
         valid, reason = check_output(full)
         if not valid:
             raise GuardrailViolation(reason)
-        conversations[session_id].extend([
+        conversations[_conversation_key(session_id, owner_id)].extend([
             {"role": "user", "parts": [{"text": message}]},
             {"role": "model", "parts": [{"text": full}]},
         ])
+        if storage_status() == "ready":
+            save_message(session_id, "user", message, owner_id)
+            save_message(session_id, "model", full, owner_id)
     except GuardrailViolation:
         raise
     except Exception as exc:
         _raise_provider_error(exc)
 
 
-def clear_conversation(session_id: str) -> None:
-    conversations.pop(session_id, None)
+def clear_conversation(session_id: str, owner_id: str | None = None) -> None:
+    conversations.pop(_conversation_key(session_id, owner_id), None)

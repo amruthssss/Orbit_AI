@@ -1,6 +1,6 @@
 """FastAPI application entry point for the Orbit AI engineering platform."""
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,8 @@ from app.llm import (
 from app.routes import api
 from app.schemas import ChatRequest, ChatResponse
 from app.storage import StorageUnavailable, init_db, list_messages, record_usage, storage_status
+from app.dependencies import current_user
+from app.storage import session_belongs_to
 from app.cache import allow_request, cache_status
 import time
 
@@ -79,12 +81,13 @@ for prefix in ("assets", "static"):
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
+def chat(request: ChatRequest, user: dict | None = Depends(current_user)):
     start = time.perf_counter()
     try:
-        response = generate_response(request.session_id, request.message)
+        response = generate_response(request.session_id, request.message, user["id"] if user else None)
         if storage_status() == "ready":
-            record_usage("chat", request.session_id, (time.perf_counter() - start) * 1000)
+            record_usage("chat", request.session_id, (time.perf_counter() - start) * 1000,
+                         owner_id=user["id"] if user else None)
         return ChatResponse(session_id=request.session_id, response=response)
     except GuardrailViolation as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -97,27 +100,34 @@ def chat(request: ChatRequest):
 
 
 @app.delete("/chat/{session_id}")
-def reset_chat(session_id: str):
-    clear_conversation(session_id)
+def reset_chat(session_id: str, user: dict | None = Depends(current_user)):
+    if user and storage_status() == "ready" and not session_belongs_to(session_id, user["id"]):
+        raise HTTPException(404, "Conversation not found.")
+    clear_conversation(session_id, user["id"] if user else None)
     return {"message": "Conversation cleared", "session_id": session_id}
 
 
 @app.get("/chat/{session_id}")
-def chat_history(session_id: str):
-    return {"session_id": session_id, "messages": list_messages(session_id, 50)}
+def chat_history(session_id: str, user: dict | None = Depends(current_user)):
+    return {"session_id": session_id, "messages": list_messages(
+        session_id, 50, user["id"] if user else None
+    )}
 
 
 @app.post("/chat/stream")
-def chat_stream(request: ChatRequest):
+def chat_stream(request: ChatRequest, user: dict | None = Depends(current_user)):
     valid, reason = check_input(request.message)
     if not valid:
         raise HTTPException(status_code=400, detail=reason)
     def tracked_stream():
         start = time.perf_counter()
         try:
-            yield from generate_stream(request.session_id, request.message)
+            yield from generate_stream(request.session_id, request.message,
+                                       user["id"] if user else None)
         finally:
             if storage_status() == "ready":
-                record_usage("chat_stream", request.session_id, (time.perf_counter() - start) * 1000)
+                record_usage("chat_stream", request.session_id,
+                             (time.perf_counter() - start) * 1000,
+                             owner_id=user["id"] if user else None)
 
     return StreamingResponse(tracked_stream(), media_type="text/plain")

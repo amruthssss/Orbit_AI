@@ -41,6 +41,7 @@ def _configure() -> None:
                 headers={"Authorization": f"Bearer {settings.redis_token}"},
                 timeout=2.0,
             )
+            _redis.headers["Authorization"] = f"Bearer {settings.redis_token}"
             _redis_mode = "upstash-rest"
         else:
             import redis

@@ -26,9 +26,18 @@ const modules: { id: Page; label: string; icon: string; group: string }[] = [
 ];
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(apiUrl(path), options);
+  const headers = new Headers(options?.headers);
+  const token = localStorage.getItem("orbit-token");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await fetch(apiUrl(path), { ...options, headers });
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || "Request failed");
   return response.json();
+}
+
+function LoginView({ onAuthenticated }: { onAuthenticated: () => void }) {
+  const [registering, setRegistering] = useState(false); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [name, setName] = useState(""); const [error, setError] = useState(""); const [loading, setLoading] = useState(false);
+  async function submit() { setLoading(true); setError(""); try { const data = await api<{ token: string }>(registering ? "/api/auth/register" : "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(registering ? { email, password, name } : { email, password, name: "Local user" }) }); localStorage.setItem("orbit-token", data.token); onAuthenticated(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Authentication failed."); } finally { setLoading(false); } }
+  return <main className="auth-shell"><Card><p className="eyebrow">ORBIT AI ENGINEERING PLATFORM</p><h1>{registering ? "Create your workspace" : "Sign in to Orbit"}</h1>{registering && <label>Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>}<label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><button className="button primary full" disabled={!email.trim() || password.length < 4 || loading} onClick={() => void submit()}>{loading ? "Working…" : registering ? "Create account" : "Sign in"}</button>{error && <StatusMessage state="error" error={error} />}<button className="button subtle full" onClick={() => setRegistering(!registering)}>{registering ? "Already have an account? Sign in" : "Create a new account"}</button></Card></main>;
 }
 
 function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -155,7 +164,7 @@ function ChatView() {
     setInput(""); setBusy(true); setError("");
     setMessages((old) => [...old, { id: ++nextId.current, role: "user", content: text }, { id: assistantId, role: "assistant", content: "" }]);
     try {
-      const response = await fetch(apiUrl("/chat/stream"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: session.current, message: text }) });
+      const response = await fetch(apiUrl("/chat/stream"), { method: "POST", headers: { "Content-Type": "application/json", ...(localStorage.getItem("orbit-token") ? { Authorization: `Bearer ${localStorage.getItem("orbit-token")}` } : {}) }, body: JSON.stringify({ session_id: session.current, message: text }) });
       if (!response.ok || !response.body) throw new Error("Unable to get a response. Please try again.");
       const reader = response.body.getReader(); const decoder = new TextDecoder(); let answer = "";
       while (true) {
@@ -250,7 +259,8 @@ function ViewHeading({ title, subtitle, action }: { title: string; subtitle: str
 function Empty({ text }: { text: string }) { return <div className="empty"><span>◇</span><p>{text}</p></div>; }
 
 export default function App() {
-  const [page, setPage] = useState<Page>("chat"); const [mobileOpen, setMobileOpen] = useState(false);
+  const [page, setPage] = useState<Page>("chat"); const [mobileOpen, setMobileOpen] = useState(false); const [authenticated, setAuthenticated] = useState(() => Boolean(localStorage.getItem("orbit-token")));
+  if (!authenticated) return <LoginView onAuthenticated={() => setAuthenticated(true)} />;
   const render = { chat: <ChatView />, knowledge: <KnowledgeView />, resume: <ResumeView />, content: <ContentView />, research: <ResearchView />, agents: <AgentsView />, evaluation: <EvaluationView />, analytics: <AnalyticsView />, settings: <SettingsView /> }[page];
   return <div className="app-shell"><aside className={`sidebar ${mobileOpen ? "open" : ""}`}><div className="brand"><span className="brand-mark">✦</span><div>orbit<span>AI ENGINEERING</span></div></div><button className="new-chat" onClick={() => { setPage("chat"); setMobileOpen(false); }}>＋ <span>New conversation</span><kbd>⌘ K</kbd></button>{["Workspace", "Create", "Automate", "Operate", "System"].map((group) => <div className="nav-group" key={group}><p>{group}</p>{modules.filter((item) => item.group === group).map((item) => <button aria-current={page === item.id ? "page" : undefined} className={page === item.id ? "nav-item active" : "nav-item"} key={item.id} onClick={() => { setPage(item.id); setMobileOpen(false); }}><span>{item.icon}</span>{item.label}{item.id === "analytics" && <i>Live</i>}</button>)}</div>)}<div className="sidebar-footer"><span className="online" /><div><strong>Orbit is ready</strong><small>Local workspace · secure</small></div><span className="footer-menu">···</span></div></aside><main className="main"><header className="topbar"><button className="mobile-menu" aria-label="Toggle navigation" onClick={() => setMobileOpen(!mobileOpen)}>☰</button><div className="breadcrumb"><span>Workspace</span><b>/</b> {modules.find((item) => item.id === page)?.label}</div><div className="topbar-actions"><span className="top-status"><span className="online" /> All systems operational</span><button className="help-button" aria-label="Help">?</button><div className="profile"><span>Y</span><b>Yash</b><small>⌄</small></div></div></header><div className="content">{render}</div></main></div>;
 }

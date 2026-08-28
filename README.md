@@ -24,4 +24,9 @@ Open `http://localhost:5173` for the workspace and `/docs` for the API.
 `/api/content/generate`, `/api/research`, `/api/workflows/run`,
 `/api/evaluations`, `/api/observability/metrics`, and local auth routes are
 versioned, independently testable surfaces. Uploaded text is chunked and
-retrieved with a simple lexical RAG baseline so results remain inspectable.
+persisted with Gemini embeddings when available, with a transparent lexical
+fallback. Set `TAVILY_API_KEY` for real web research; without it the API
+reports research as unavailable rather than inventing sources. Set
+`SECRET_KEY` in production: JWT bearer authentication protects documents,
+evaluations, metrics, and chat history (development/tests remain anonymous for
+local compatibility).
