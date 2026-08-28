@@ -142,7 +142,11 @@ function ChatView() {
       if (!response.ok || !response.body) throw new Error("Unable to get a response. Please try again.");
       const reader = response.body.getReader(); const decoder = new TextDecoder(); let answer = "";
       while (true) {
-        const chunk = await reader.read(); if (chunk.done) break;
+        const chunk = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("Unable to get a response. Please try again.")), 30000)),
+        ]);
+        if (chunk.done) break;
         answer += decoder.decode(chunk.value, { stream: true });
         setMessages((old) => old.map((item) => item.id === assistantId ? { ...item, content: answer } : item));
       }
