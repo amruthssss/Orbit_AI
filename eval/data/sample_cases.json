@@ -1,0 +1,7 @@
+[
+  {
+    "id": "architecture-smoke",
+    "question": "What does this project provide?",
+    "expected_keywords": ["chat", "retrieval", "evaluation"]
+  }
+]

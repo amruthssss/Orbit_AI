@@ -1,0 +1,57 @@
+[
+  {
+    "id": 1,
+    "question": "What is machine learning?",
+    "actual_answer": "**Machine Learning (ML)** is a branch of artificial intelligence (AI) that allows computers to learn and make decisions from data, rather than being explicitly programmed with strict rules.\n\nInstead of writing step-by-step instructions for the computer to follow, you feed the computer large amounts of data. The computer uses algorithms to find patterns in that data and learns how to make predictions or decisions on its own.\n\n---\n\n### Traditional Programming vs. Machine Learning\n\nTo understand the difference, imagine teaching a computer to identify a cat in a photo:\n\n*   **Traditional Programming:** A human developer writes detailed rules: *\"If it has two pointed ears, whiskers, a tail, and fur, then it is a cat.\"* (This is hard because cats come in many shapes, sizes, and poses).\n*   **Machine Learning:** You show the computer thousands of photos labeled \"cat\" and thousands labeled \"not a cat.\" The algorithm analyzes the images, finds the patterns that define a cat on its own, and learns to identify cats in brand-new photos.\n\n---\n\n### The 3 Main Types of Machine Learning\n\n1.  **",
+    "evaluation": {
+      "correctness": 4,
+      "relevance": 5,
+      "instruction_following": 4,
+      "reason": "The actual answer provides an accurate, detailed, and highly relevant explanation of machine learning, but it cuts off abruptly at the end."
+    }
+  },
+  {
+    "id": 2,
+    "question": "What is RAG?",
+    "actual_answer": "N/A (RAG is a well-defined technical standard).\n    *   *No invented facts?* Checked.\n    *   *Clear and easy to understand?*",
+    "evaluation": {
+      "correctness": 1,
+      "relevance": 1,
+      "instruction_following": 1,
+      "reason": "The actual answer does not define RAG and instead contains placeholder/template text, failing to answer the question entirely."
+    }
+  },
+  {
+    "id": 3,
+    "question": "What is an embedding?",
+    "actual_answer": "In artificial intelligence and machine learning, an **embedding** is a way of translating complex information—like words, images, audio, or entire documents—into a list of numbers that a",
+    "evaluation": {
+      "correctness": 3,
+      "relevance": 5,
+      "instruction_following": 4,
+      "reason": "The response accurately defines an embedding and is fully relevant to the prompt, but it cuts off abruptly mid-sentence."
+    }
+  },
+  {
+    "id": 4,
+    "question": "What is a vector database?",
+    "actual_answer": "A **vector database** is a specialized database designed to store, manage, and search **high-dimensional vectors** (also known as *vector embeddings*). \n\nUnlike traditional",
+    "evaluation": {
+      "correctness": 4,
+      "relevance": 5,
+      "instruction_following": 2,
+      "reason": "The answer accurately defines a vector database in the first sentence, but cuts off mid-sentence at the end, making the response incomplete."
+    }
+  },
+  {
+    "id": 5,
+    "question": "What is supervised learning?",
+    "actual_answer": "**Supervised learning** is a type of machine learning where a computer algorithm is trained using **labeled data**. \"Labeled data\" means that the input data already comes with the correct answer (the output).\n\nThe goal of supervised learning is for the algorithm to learn the relationship between the inputs and outputs so that when it is given *new, unseen data*, it can accurately predict the correct answer.\n\n---\n\n### The \"Teacher\" Analogy\nThink of supervised learning like a student studying with flashcards alongside a teacher:\n1. **Front of the card (Input):** A picture of an animal.\n2. **Back of the card (Label/Output):** The answer, e.g., \"Dog.\"\n3. **The Learning:** The student (the algorithm) guesses the animal. The teacher (the label) corrects the student until the student recognizes the patterns that make a dog a dog.\n4. **The Test:** The student is shown a brand-new picture of a dog without the answer key and successfully identifies it",
+    "evaluation": {
+      "correctness": 5,
+      "relevance": 5,
+      "instruction_following": 5,
+      "reason": "The actual answer is fully accurate, highly relevant, and clearly explains supervised learning using clear definitions and a helpful analogy."
+    }
+  }
+]

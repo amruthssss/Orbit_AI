@@ -1,0 +1,27 @@
+[
+  {
+    "id": 1,
+    "question": "What is machine learning?",
+    "expected_answer": "Machine learning is a field of AI where systems learn patterns from data to make predictions or decisions."
+  },
+  {
+    "id": 2,
+    "question": "What is RAG?",
+    "expected_answer": "RAG stands for Retrieval-Augmented Generation. It retrieves relevant information from external sources and provides that information to an LLM to generate a response."
+  },
+  {
+    "id": 3,
+    "question": "What is an embedding?",
+    "expected_answer": "An embedding is a numerical vector representation of data such as text that captures semantic information."
+  },
+  {
+    "id": 4,
+    "question": "What is a vector database?",
+    "expected_answer": "A vector database stores and searches numerical vector representations, often using similarity search."
+  },
+  {
+    "id": 5,
+    "question": "What is supervised learning?",
+    "expected_answer": "Supervised learning trains a model using labeled examples to learn a mapping from inputs to outputs."
+  }
+]
