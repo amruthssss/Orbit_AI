@@ -129,7 +129,15 @@ function ChatView() {
   const nextId = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => localStorage.setItem("orbit-session", session.current), []);
-  useEffect(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), [messages]);
+  useEffect(() => {
+    const element = scrollRef.current;
+    if (!element) return;
+    if (typeof element.scrollTo === "function") {
+      element.scrollTo({ top: element.scrollHeight, behavior: "smooth" });
+    } else {
+      element.scrollTop = element.scrollHeight;
+    }
+  }, [messages]);
 
   async function send(raw: string) {
     const text = raw.trim();
