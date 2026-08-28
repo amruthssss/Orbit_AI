@@ -2,12 +2,13 @@
 from __future__ import annotations
 import base64
 import time
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, HTTPException, UploadFile
 from app.schemas import (AuthRequest, ChatRequest, DocumentCreate, EvaluationRequest,
                          GenerateRequest, ResumeRequest, ResearchRequest, SearchRequest,
                          WorkflowRequest)
-from app.services import (analyze_resume, chunks, evaluate, generate_content, hash_password,
-                          research, retrieve, run_workflow, verify_password)
+from app.services import (analyze_resume, chunks, evaluate, extract_document_text,
+                          generate_content, hash_password, research, retrieve, run_workflow,
+                          verify_password)
 from app.storage import (
     DuplicateUser,
     StorageUnavailable,
@@ -60,6 +61,22 @@ def upload_document(request: DocumentCreate):
     return {"document": item}
 
 
+@knowledge.post("/documents/upload")
+async def upload_document_file(file: UploadFile = File(...), collection: str = "default"):
+    if not file.filename:
+        raise HTTPException(400, "A document file is required.")
+    if not file.filename.lower().endswith((".pdf", ".txt", ".md", ".json", ".csv")):
+        raise HTTPException(415, "Supported files are PDF, TXT, MD, JSON, and CSV.")
+    content = await file.read()
+    if len(content) > 10_000_000:
+        raise HTTPException(413, "Document exceeds the 10 MB upload limit.")
+    try:
+        text = extract_document_text(file.filename, content)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"document": add_document(file.filename, text, collection, len(chunks(text)))}
+
+
 @knowledge.get("/documents")
 def get_documents(collection: str = "default"):
     return {"documents": list_documents(collection)}
@@ -98,6 +115,22 @@ def search_documents(request: SearchRequest):
 @tools.post("/resume/analyze")
 def resume_analyze(request: ResumeRequest):
     return analyze_resume(request.resume, request.job_description)
+
+
+@tools.post("/resume/analyze-file")
+async def resume_analyze_file(
+    file: UploadFile = File(...), job_description: str = ""
+):
+    if not file.filename or not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(415, "Please upload a PDF resume.")
+    content = await file.read()
+    if len(content) > 10_000_000:
+        raise HTTPException(413, "Resume exceeds the 10 MB upload limit.")
+    try:
+        resume = extract_document_text(file.filename, content)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return analyze_resume(resume, job_description)
 
 
 @tools.post("/content/generate")

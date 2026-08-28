@@ -6,6 +6,9 @@ import hmac
 import re
 import secrets
 
+from pypdf import PdfReader
+from pypdf.errors import PdfReadError
+
 from app.storage import documents
 
 
@@ -17,6 +20,23 @@ def chunks(text: str, size: int = 900, overlap: int = 120) -> list[str]:
         result.append(" ".join(words[start:start + size]))
         start += max(1, size - overlap)
     return result or [""]
+
+
+def extract_document_text(filename: str, content: bytes) -> str:
+    """Extract text from supported uploads without inventing document content."""
+    if filename.lower().endswith(".pdf"):
+        import io
+
+        try:
+            reader = PdfReader(io.BytesIO(content))
+        except PdfReadError as exc:
+            raise ValueError("Unable to read this PDF file.") from exc
+        text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    else:
+        text = content.decode("utf-8", errors="replace").strip()
+    if not text:
+        raise ValueError("The document contains no extractable text.")
+    return text
 
 
 def retrieve(query: str, collection: str = "default", limit: int = 5) -> list[dict]:

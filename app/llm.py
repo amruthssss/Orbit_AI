@@ -6,6 +6,8 @@ import time
 from collections import defaultdict
 from app.config import GEMINI_API_KEY, settings
 from app.guardrails import check_input, check_output, GuardrailViolation
+from app.services import retrieve
+from app.storage import storage_status
 
 logger = logging.getLogger(__name__)
 MODEL_NAME = settings.gemini_model
@@ -49,6 +51,25 @@ def _fallback(message: str) -> str:
             "Connect GEMINI_API_KEY to enable model-backed answers.")
 
 
+def _grounded_message(message: str) -> str:
+    if storage_status() != "ready":
+        return message
+    matches = retrieve(message, limit=5)
+    if not matches:
+        return message
+    context = "\n\n".join(
+        f"[Source: {match['name']} · chunk {match['chunk'] + 1}]\n{match['text']}"
+        for match in matches
+    )
+    return (
+        f"{message}\n\n"
+        "Use the following retrieved context when it is relevant. Do not invent "
+        "details beyond it, and cite sources by their exact name when making a "
+        "grounded claim:\n\n"
+        f"{context}"
+    )
+
+
 def _status_code(exc: Exception) -> int | None:
     for candidate in (getattr(exc, "status_code", None), getattr(exc, "code", None)):
         if isinstance(candidate, int):
@@ -77,7 +98,7 @@ def generate_response(session_id: str, message: str) -> str:
             answer = _fallback(message)
         else:
             response = client.models.generate_content(
-                model=MODEL_NAME, contents=_history(session_id, message),
+                model=MODEL_NAME, contents=_history(session_id, _grounded_message(message)),
                 config={"system_instruction": SYSTEM_PROMPT, "temperature": 0.3, "max_output_tokens": 1000},
             )
             answer = response.text or ""
@@ -114,7 +135,7 @@ def generate_stream(session_id: str, message: str):
     full = ""
     try:
         response = client.models.generate_content_stream(
-            model=MODEL_NAME, contents=_history(session_id, message),
+            model=MODEL_NAME, contents=_history(session_id, _grounded_message(message)),
             config={"system_instruction": SYSTEM_PROMPT, "temperature": 0.3, "max_output_tokens": 1000},
         )
         for chunk in response:
