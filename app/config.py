@@ -11,7 +11,7 @@ class Settings:
     gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
     database_url: str | None = os.getenv("DATABASE_URL") or None
-    redis_url: str | None = os.getenv("REDIS_URL")
+    redis_url: str | None = os.getenv("REDIS_URL") or os.getenv("UPSTASH_REDIS_REST_URL")
     redis_token: str | None = (
         os.getenv("REDIS_TOKEN") or os.getenv("UPSTASH_REDIS_REST_TOKEN") or None
     )

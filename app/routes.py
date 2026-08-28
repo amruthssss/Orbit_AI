@@ -68,6 +68,7 @@ async def upload_document_file(file: UploadFile = File(...), collection: str = "
     if not file.filename.lower().endswith((".pdf", ".txt", ".md", ".json", ".csv", ".docx")):
         raise HTTPException(415, "Supported files are PDF, DOCX, TXT, MD, JSON, and CSV.")
     content = await file.read()
+    await file.close()
     if len(content) > 10_000_000:
         raise HTTPException(413, "Document exceeds the 10 MB upload limit.")
     try:
@@ -124,6 +125,7 @@ async def resume_analyze_file(
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(415, "Please upload a PDF resume.")
     content = await file.read()
+    await file.close()
     if len(content) > 10_000_000:
         raise HTTPException(413, "Resume exceeds the 10 MB upload limit.")
     try:
