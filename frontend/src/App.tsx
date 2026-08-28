@@ -5,6 +5,13 @@ type Page = "chat" | "knowledge" | "resume" | "content" | "research" | "agents" 
 type Message = { id: number; role: "user" | "assistant"; content: string; error?: boolean };
 type DocumentItem = { id: string; name: string; collection: string; chunks: number; characters: number; created_at: string };
 type LoadState = "idle" | "loading" | "success" | "error";
+const API_BASE_URL = (
+  (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_API_URL || ""
+).replace(/\/+$/, "");
+
+function apiUrl(path: string): string {
+  return API_BASE_URL ? `${API_BASE_URL}${path}` : path;
+}
 
 const modules: { id: Page; label: string; icon: string; group: string }[] = [
   { id: "chat", label: "Chat", icon: "✦", group: "Workspace" },
@@ -19,7 +26,7 @@ const modules: { id: Page; label: string; icon: string; group: string }[] = [
 ];
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(path, options);
+  const response = await fetch(apiUrl(path), options);
   if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || "Request failed");
   return response.json();
 }
@@ -117,8 +124,8 @@ function ChatView() {
     setInput(""); setBusy(true); setError("");
     setMessages((old) => [...old, { id: ++nextId.current, role: "user", content: text }, { id: assistantId, role: "assistant", content: "" }]);
     try {
-      const response = await fetch("/chat/stream", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: session.current, message: text }) });
-      if (!response.ok || !response.body) throw new Error("Unable to reach the model.");
+      const response = await fetch(apiUrl("/chat/stream"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ session_id: session.current, message: text }) });
+      if (!response.ok || !response.body) throw new Error("Unable to get a response. Please try again.");
       const reader = response.body.getReader(); const decoder = new TextDecoder(); let answer = "";
       while (true) {
         const chunk = await reader.read(); if (chunk.done) break;
@@ -126,7 +133,9 @@ function ChatView() {
         setMessages((old) => old.map((item) => item.id === assistantId ? { ...item, content: answer } : item));
       }
     } catch (caught) {
-      const message = caught instanceof Error ? caught.message : "Something went wrong.";
+      const message = caught instanceof Error && caught.message !== "Failed to fetch"
+        ? caught.message
+        : "Unable to get a response. Please try again.";
       setError(message);
       setMessages((old) => old.map((item) => item.id === assistantId ? { ...item, content: message, error: true } : item));
     } finally { setBusy(false); }
