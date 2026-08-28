@@ -22,9 +22,15 @@ import time
 init_db()
 app = FastAPI(title="Orbit AI Engineering Platform", version="2.0.0",
               description="Modular chat, retrieval, content, agent and evaluation APIs.")
+allowed_origins = {
+    origin.strip()
+    for origin in settings.cors_origins.split(",")
+    if origin.strip()
+}
+allowed_origins.add("https://orbit-ai-nine-pi.vercel.app")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[origin.strip() for origin in settings.cors_origins.split(",")],
+    allow_origins=sorted(allowed_origins),
     allow_credentials=True, allow_methods=["*"], allow_headers=["*"],
 )
 app.include_router(api)
