@@ -7,7 +7,7 @@ from collections import defaultdict
 from app.config import GEMINI_API_KEY, settings
 from app.guardrails import check_input, check_output, GuardrailViolation
 from app.services import retrieve
-from app.storage import storage_status
+from app.storage import list_messages, save_message, storage_status
 
 logger = logging.getLogger(__name__)
 MODEL_NAME = settings.gemini_model
@@ -40,9 +40,24 @@ except Exception as exc:  # Optional provider must never prevent local startup.
 
 
 def _history(session_id: str, message: str) -> list[dict]:
+    if not conversations[session_id] and storage_status() == "ready":
+        conversations[session_id].extend(
+            {"role": item["role"], "parts": [{"text": item["content"]}]}
+            for item in list_messages(session_id, MAX_HISTORY_MESSAGES)
+        )
     return conversations[session_id][-MAX_HISTORY_MESSAGES:] + [
         {"role": "user", "parts": [{"text": message}]}
     ]
+
+
+def _save_exchange(session_id: str, message: str, answer: str) -> None:
+    conversations[session_id].extend([
+        {"role": "user", "parts": [{"text": message}]},
+        {"role": "model", "parts": [{"text": answer}]},
+    ])
+    if storage_status() == "ready":
+        save_message(session_id, "user", message)
+        save_message(session_id, "model", answer)
 
 
 def _fallback(message: str) -> str:
@@ -105,10 +120,7 @@ def generate_response(session_id: str, message: str) -> str:
         valid, reason = check_output(answer)
         if not valid:
             raise GuardrailViolation(reason)
-        conversations[session_id].extend([
-            {"role": "user", "parts": [{"text": message}]},
-            {"role": "model", "parts": [{"text": answer}]},
-        ])
+        _save_exchange(session_id, message, answer)
         logger.info("chat completed session=%s latency_ms=%.1f", session_id, (time.perf_counter() - start) * 1000)
         return answer
     except GuardrailViolation:
@@ -127,10 +139,7 @@ def generate_stream(session_id: str, message: str):
         answer = _fallback(message)
         for word in answer.split(" "):
             yield word + " "
-        conversations[session_id].extend([
-            {"role": "user", "parts": [{"text": message}]},
-            {"role": "model", "parts": [{"text": answer}]},
-        ])
+        _save_exchange(session_id, message, answer)
         return
     full = ""
     try:

@@ -83,7 +83,8 @@ def chat(request: ChatRequest):
     start = time.perf_counter()
     try:
         response = generate_response(request.session_id, request.message)
-        record_usage("chat", request.session_id, (time.perf_counter() - start) * 1000)
+        if storage_status() == "ready":
+            record_usage("chat", request.session_id, (time.perf_counter() - start) * 1000)
         return ChatResponse(session_id=request.session_id, response=response)
     except GuardrailViolation as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -106,4 +107,12 @@ def chat_stream(request: ChatRequest):
     valid, reason = check_input(request.message)
     if not valid:
         raise HTTPException(status_code=400, detail=reason)
-    return StreamingResponse(generate_stream(request.session_id, request.message), media_type="text/plain")
+    def tracked_stream():
+        start = time.perf_counter()
+        try:
+            yield from generate_stream(request.session_id, request.message)
+        finally:
+            if storage_status() == "ready":
+                record_usage("chat_stream", request.session_id, (time.perf_counter() - start) * 1000)
+
+    return StreamingResponse(tracked_stream(), media_type="text/plain")

@@ -76,6 +76,14 @@ evaluations_table = Table(
     Column("score", Float, nullable=False),
     Column("created_at", String(40), nullable=False),
 )
+messages_table = Table(
+    "messages", metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("session_id", String(100), nullable=False),
+    Column("role", String(20), nullable=False),
+    Column("content", Text, nullable=False),
+    Column("created_at", String(40), nullable=False),
+)
 
 
 class StorageUnavailable(RuntimeError):
@@ -249,6 +257,25 @@ def usage_summary() -> dict:
     result = dict(row)
     result["avg_latency_ms"] = round(float(result["avg_latency_ms"]), 2)
     return result
+
+
+def save_message(session_id: str, role: str, content: str) -> None:
+    with transaction() as db:
+        db.execute(insert(messages_table).values(
+            session_id=session_id, role=role, content=content, created_at=now()
+        ))
+
+
+def list_messages(session_id: str, limit: int = 10) -> list[dict]:
+    query = (
+        select(messages_table.c.role, messages_table.c.content)
+        .where(messages_table.c.session_id == session_id)
+        .order_by(messages_table.c.id.desc())
+        .limit(limit)
+    )
+    with transaction() as db:
+        rows = db.execute(query).mappings().all()
+    return [dict(row) for row in reversed(rows)]
 
 
 def save_evaluation(prompt: str, expected: str, actual: str, score: float) -> dict:

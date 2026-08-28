@@ -65,8 +65,8 @@ def upload_document(request: DocumentCreate):
 async def upload_document_file(file: UploadFile = File(...), collection: str = "default"):
     if not file.filename:
         raise HTTPException(400, "A document file is required.")
-    if not file.filename.lower().endswith((".pdf", ".txt", ".md", ".json", ".csv")):
-        raise HTTPException(415, "Supported files are PDF, TXT, MD, JSON, and CSV.")
+    if not file.filename.lower().endswith((".pdf", ".txt", ".md", ".json", ".csv", ".docx")):
+        raise HTTPException(415, "Supported files are PDF, DOCX, TXT, MD, JSON, and CSV.")
     content = await file.read()
     if len(content) > 10_000_000:
         raise HTTPException(413, "Document exceeds the 10 MB upload limit.")

@@ -216,6 +216,7 @@ label input, label textarea, label select { display: block; margin-top: 7px; fon
   .breadcrumb { margin-left: 10px; margin-right: auto; }
   .top-status, .profile b, .profile small, .help-button { display: none; }
   .content { padding: 28px 18px; }
+  .sidebar.open::after { content: ""; position: fixed; z-index: -1; top: 0; left: 256px; width: 100vw; height: 100vh; background: #0008; }
   .view-heading { align-items: flex-start; flex-direction: column; margin-bottom: 22px; }
   .view-heading h2 { font-size: 29px; }
   .two-col, .metric-grid { grid-template-columns: 1fr; }

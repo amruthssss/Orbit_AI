@@ -32,6 +32,12 @@ def extract_document_text(filename: str, content: bytes) -> str:
         except PdfReadError as exc:
             raise ValueError("Unable to read this PDF file.") from exc
         text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
+    elif filename.lower().endswith(".docx"):
+        import io
+        from docx import Document
+
+        document = Document(io.BytesIO(content))
+        text = "\n".join(paragraph.text for paragraph in document.paragraphs).strip()
     else:
         text = content.decode("utf-8", errors="replace").strip()
     if not text:
