@@ -146,6 +146,8 @@ function ChatView() {
         answer += decoder.decode(chunk.value, { stream: true });
         setMessages((old) => old.map((item) => item.id === assistantId ? { ...item, content: answer } : item));
       }
+      answer += decoder.decode();
+      if (!answer.trim()) throw new Error("Unable to get a response. Please try again.");
     } catch (caught) {
       const message = caught instanceof Error && caught.message !== "Failed to fetch"
         ? caught.message
