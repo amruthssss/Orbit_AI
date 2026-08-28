@@ -128,7 +128,16 @@ function ChatView() {
   const session = useRef(localStorage.getItem("orbit-session") || `session-${crypto.randomUUID()}`);
   const nextId = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
-  useEffect(() => localStorage.setItem("orbit-session", session.current), []);
+  useEffect(() => {
+    localStorage.setItem("orbit-session", session.current);
+    void api<{ messages: { role: string; content: string }[] }>(`/chat/${session.current}`)
+      .then((data) => setMessages(data.messages.map((item, index) => ({
+        id: index + 1,
+        role: item.role === "model" ? "assistant" : "user",
+        content: item.content,
+      }))))
+      .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load conversation history."));
+  }, []);
   useEffect(() => {
     const element = scrollRef.current;
     if (!element) return;

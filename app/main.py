@@ -15,7 +15,7 @@ from app.llm import (
 )
 from app.routes import api
 from app.schemas import ChatRequest, ChatResponse
-from app.storage import StorageUnavailable, init_db, record_usage, storage_status
+from app.storage import StorageUnavailable, init_db, list_messages, record_usage, storage_status
 from app.cache import allow_request, cache_status
 import time
 
@@ -100,6 +100,11 @@ def chat(request: ChatRequest):
 def reset_chat(session_id: str):
     clear_conversation(session_id)
     return {"message": "Conversation cleared", "session_id": session_id}
+
+
+@app.get("/chat/{session_id}")
+def chat_history(session_id: str):
+    return {"session_id": session_id, "messages": list_messages(session_id, 50)}
 
 
 @app.post("/chat/stream")
