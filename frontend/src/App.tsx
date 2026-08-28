@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Component, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 type Page = "chat" | "knowledge" | "resume" | "content" | "research" | "agents" | "evaluation" | "analytics" | "settings";
@@ -99,6 +99,20 @@ function FormattedResponse({ content }: { content: string }) {
   return <div className="formatted-response">{blocks}</div>;
 }
 
+class ResponseErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  render() {
+    return this.state.hasError
+      ? <p className="message-error">Unable to get a response. Please try again.</p>
+      : this.props.children;
+  }
+}
+
 function StatusMessage({ state, error, success }: { state: LoadState; error?: string; success?: string }) {
   if (state === "loading") return <p className="status loading" role="status"><span className="spinner" />Working…</p>;
   if (state === "error") return <p className="status error" role="alert">⚠ {error || "Something went wrong. Please try again."}</p>;
@@ -151,7 +165,7 @@ function ChatView() {
       <h2>Build with intelligence.</h2><p className="empty-copy">One calm workspace to chat, retrieve, automate, and evaluate with confidence.</p>
       <div className="prompt-grid">{["Explain retrieval augmented generation", "Help me design an API", "Review a product brief"].map((item) => <button key={item} onClick={() => void send(item)}><span>{item}</span><b>↗</b></button>)}</div>
       <div className="capability-row"><span>⌁ Grounded answers</span><span>◌ Streaming responses</span><span>◈ Local-first</span></div>
-    </div> : <div ref={scrollRef} className="message-list">{messages.map((message) => <div className={`message ${message.role}`} key={message.id}><div className="message-avatar">{message.role === "assistant" ? "✦" : "Y"}</div><div className="message-body"><div className="message-label">{message.role === "assistant" ? "Orbit" : "You"} <span>{message.role === "assistant" ? "AI assistant" : "Just now"}</span></div><div className={`message-content ${message.error ? "message-error" : ""}`}>{message.content ? (message.role === "assistant" ? <FormattedResponse content={message.content} /> : message.content) : <><span className="thinking-dot" /><span className="thinking-dot" /><span className="thinking-dot" /></>}</div></div></div>)}</div>}
+    </div> : <div ref={scrollRef} className="message-list">{messages.map((message) => <div className={`message ${message.role}`} key={message.id}><div className="message-avatar">{message.role === "assistant" ? "✦" : "Y"}</div><div className="message-body"><div className="message-label">{message.role === "assistant" ? "Orbit" : "You"} <span>{message.role === "assistant" ? "AI assistant" : "Just now"}</span></div><div className={`message-content ${message.error ? "message-error" : ""}`}>{message.content ? (message.role === "assistant" ? <ResponseErrorBoundary><FormattedResponse content={message.content} /></ResponseErrorBoundary> : message.content) : <><span className="thinking-dot" /><span className="thinking-dot" /><span className="thinking-dot" /></>}</div></div></div>)}</div>}
     {error && <StatusMessage state="error" error={error} />}
     <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input); }}><textarea aria-label="Message Orbit" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder="Ask Orbit anything…" rows={1} disabled={busy} /><button aria-label="Send message" type="submit" disabled={busy || !input.trim()}>↑</button></form>
     <p className="fine-print">Enter to send · Shift + Enter for a new line · AI output should be reviewed</p>

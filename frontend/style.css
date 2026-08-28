@@ -197,9 +197,6 @@ label input, label textarea, label select { display: block; margin-top: 7px; fon
 .formatted-response pre code { padding: 0; color: #cbd7e8; background: transparent; white-space: pre; }
 .user .message-content { color: #fff; border-color: #7164dd; background: #6257c9; box-shadow: 0 5px 18px #6559d326; }
 .message-error { color: var(--danger); border-color: #f17d8a45; background: #f17d8a0c; }
-.error-boundary { display: grid; min-height: 100vh; place-content: center; gap: 16px; padding: 24px; color: var(--ink); background: var(--bg); text-align: center; }
-.error-boundary h1 { font: 600 22px "Space Grotesk", sans-serif; }
-.error-boundary button { justify-self: center; padding: 9px 14px; color: #fff; border: 1px solid var(--accent); border-radius: 7px; background: var(--accent); }
 .thinking-dot { display: inline-block; width: 5px; height: 5px; margin: 0 3px; border-radius: 50%; background: var(--accent-strong); animation: blink 1s infinite; }
 .thinking-dot:nth-child(2) { animation-delay: .15s; }.thinking-dot:nth-child(3) { animation-delay: .3s; }
 @keyframes blink { 50% { opacity: .25; transform: translateY(-2px); } }
