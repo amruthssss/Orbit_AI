@@ -47,6 +47,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-footer small { margin-top: 3px; color: var(--dim); font-size: 10px; }
 .footer-menu { margin-left: auto; color: var(--dim); letter-spacing: 2px; }
 .online { display: inline-block; width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 4px #59d49b14, 0 0 12px #59d49b; }
+.sidebar-footer .degraded, .top-status .degraded { display: inline-block; width: 7px; height: 7px; flex: none; border-radius: 50%; background: #efb94e; box-shadow: 0 0 0 4px #efb94e1b; }
 
 .main { display: flex; flex: 1; min-width: 0; flex-direction: column; }
 .topbar { display: flex; align-items: center; justify-content: space-between; height: 68px; padding: 0 42px; border-bottom: 1px solid var(--line); background: #0b1019b8; backdrop-filter: blur(14px); }
@@ -420,8 +421,11 @@ body {
 .top-status { color: #68758c; }
 .top-status.connected { color: #16815c; }
 .top-status.disconnected { color: #ae7115; }
+.top-status.degraded { color: #a66b10; }
 .top-status .online { box-shadow: 0 0 0 4px #1a9b6818; }
 .top-status .offline { box-shadow: 0 0 0 4px #d6982c20; }
+.top-status .degraded { background: #d6972d; box-shadow: 0 0 0 4px #d6972d20; }
+.sidebar-footer .degraded { background: #d6972d; box-shadow: 0 0 0 4px #d6972d20; }
 .profile { color: #28354b; border-color: #e7eaf1; }
 .profile > span { border-color: #d7d5ff; color: #fff; background: linear-gradient(145deg, #7772f5, #514cbf); }
 .signout-button { color: #637087; }
