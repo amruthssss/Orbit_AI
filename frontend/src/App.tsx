@@ -6,6 +6,28 @@ type Message = { id: number; role: "user" | "assistant"; content: string; error?
 type DocumentItem = { id: string; name: string; collection: string; chunks: number; characters: number; created_at: string };
 type LoadState = "idle" | "loading" | "success" | "error";
 type Health = { status: string; environment: string; database: string; redis: string; gemini_model: string };
+type ApiErrorPayload = { detail?: string | { msg?: string }[] };
+
+class ApiRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
+}
+
+function clearSession() {
+  localStorage.removeItem("orbit-token");
+  localStorage.removeItem("orbit-name");
+  localStorage.removeItem("orbit-session");
+  window.dispatchEvent(new Event("orbit:session-expired"));
+}
+
+function requestHeaders(options?: RequestInit): Headers {
+  const headers = new Headers(options?.headers);
+  const token = localStorage.getItem("orbit-token");
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return headers;
+}
 const API_BASE_URL = (
   (import.meta as ImportMeta & { env?: Record<string, string> }).env?.VITE_API_URL || ""
 ).replace(/\/+$/, "");
@@ -27,18 +49,23 @@ const modules: { id: Page; label: string; icon: string; group: string }[] = [
 ];
 
 async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const headers = new Headers(options?.headers);
-  const token = localStorage.getItem("orbit-token");
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const headers = requestHeaders(options);
   const response = await fetch(apiUrl(path), { ...options, headers });
-  if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || "Request failed");
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({})) as ApiErrorPayload;
+    const detail = Array.isArray(payload.detail)
+      ? payload.detail.map((item) => item.msg).filter(Boolean).join(" · ")
+      : payload.detail;
+    if (response.status === 401 && !path.startsWith("/api/auth/")) clearSession();
+    throw new ApiRequestError(detail || `Request failed (${response.status}).`, response.status);
+  }
   return response.json();
 }
 
-function LoginView({ onAuthenticated }: { onAuthenticated: (name: string) => void }) {
+function LoginView({ onAuthenticated, notice }: { onAuthenticated: (name: string) => void; notice?: string }) {
   const [registering, setRegistering] = useState(false); const [email, setEmail] = useState(""); const [password, setPassword] = useState(""); const [name, setName] = useState(""); const [error, setError] = useState(""); const [loading, setLoading] = useState(false);
   async function submit() { setLoading(true); setError(""); try { const data = await api<{ token: string; user?: { name?: string; email?: string } }>(registering ? "/api/auth/register" : "/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(registering ? { email, password, name } : { email, password, name: "Local user" }) }); localStorage.setItem("orbit-token", data.token); const displayName = data.user?.name || email.split("@")[0] || "Orbit user"; localStorage.setItem("orbit-name", displayName); onAuthenticated(displayName); } catch (caught) { setError(caught instanceof Error ? caught.message : "Authentication failed."); } finally { setLoading(false); } }
-  return <main className="auth-shell"><Card><p className="eyebrow">ORBIT AI ENGINEERING PLATFORM</p><h1>{registering ? "Create your workspace" : "Sign in to Orbit"}</h1>{registering && <label>Name<input value={name} onChange={(event) => setName(event.target.value)} /></label>}<label>Email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label><button className="button primary full" disabled={!email.trim() || password.length < 4 || loading} onClick={() => void submit()}>{loading ? "Working…" : registering ? "Create account" : "Sign in"}</button>{error && <StatusMessage state="error" error={error} />}<button className="button subtle full" onClick={() => setRegistering(!registering)}>{registering ? "Already have an account? Sign in" : "Create a new account"}</button></Card></main>;
+  return <main className="auth-shell"><section className="auth-story"><div className="brand auth-brand"><span className="brand-mark">✦</span><div>orbit<span>AI ENGINEERING</span></div></div><div className="auth-story-copy"><p className="eyebrow">YOUR AI WORKSPACE</p><h1>Make room for<br /><span>better thinking.</span></h1><p>One place to explore ideas, work with your knowledge, and turn research into action.</p><div className="auth-feature-list"><span><i>✦</i> Grounded conversations</span><span><i>◈</i> Practical AI workflows</span><span><i>↗</i> Clear, measurable results</span></div></div><div className="auth-story-foot"><span className="online" /> Private workspace <span>·</span> Built for focused work</div></section><section className="auth-form-wrap"><form className="card auth-card" onSubmit={(event) => { event.preventDefault(); void submit(); }}><p className="eyebrow">{registering ? "GET STARTED" : "WELCOME BACK"}</p><h2>{registering ? "Create your account" : "Sign in to Orbit"}</h2><p className="auth-intro">{registering ? "Set up your AI engineering workspace." : "Continue to your AI engineering workspace."}</p>{notice && <p className="auth-notice" role="status">{notice}</p>}{registering && <label htmlFor="auth-name">Full name<input id="auth-name" autoComplete="name" required value={name} onChange={(event) => setName(event.target.value)} placeholder="Your name" /></label>}<label htmlFor="auth-email">Email address<input id="auth-email" type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="you@example.com" /></label><label htmlFor="auth-password">Password<input id="auth-password" type="password" autoComplete={registering ? "new-password" : "current-password"} minLength={4} required value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your password" /></label><button className="button primary full auth-submit" type="submit" disabled={!email.trim() || password.length < 4 || (registering && !name.trim()) || loading}>{loading ? <><span className="spinner" />{registering ? "Creating account…" : "Signing in…"}</> : registering ? "Create account" : "Sign in"}<span aria-hidden="true">→</span></button>{error && <StatusMessage state="error" error={error} />}<p className="auth-toggle">{registering ? "Already have an account?" : "New to Orbit?"}<button type="button" className="text-button" onClick={() => { setRegistering(!registering); setError(""); }}>{registering ? "Sign in" : "Create an account"}</button></p></form><p className="auth-legal">Your credentials are securely handled by the Orbit API.</p></section></main>;
 }
 
 function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -130,24 +157,29 @@ function StatusMessage({ state, error, success }: { state: LoadState; error?: st
   return null;
 }
 
-function ChatView() {
+function ChatView({ sessionId }: { sessionId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const session = useRef(localStorage.getItem("orbit-session") || `session-${crypto.randomUUID()}`);
   const nextId = useRef(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const streamController = useRef<AbortController | null>(null);
   useEffect(() => {
-    localStorage.setItem("orbit-session", session.current);
-    void api<{ messages: { role: string; content: string }[] }>(`/chat/${session.current}`)
-      .then((data) => setMessages(data.messages.map((item, index) => ({
+    let active = true;
+    localStorage.setItem("orbit-session", sessionId);
+    setMessages([]); setInput(""); setBusy(false); setError(""); nextId.current = 0;
+    if (composerRef.current) composerRef.current.style.height = "auto";
+    void api<{ messages: { role: string; content: string }[] }>(`/chat/${sessionId}`)
+      .then((data) => { if (!active) return; nextId.current = data.messages.length; setMessages(data.messages.map((item, index) => ({
         id: index + 1,
         role: item.role === "model" ? "assistant" : "user",
         content: item.content,
-      }))))
-      .catch((caught) => setError(caught instanceof Error ? caught.message : "Unable to load conversation history."));
-  }, []);
+      }))); })
+      .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Unable to load conversation history."); });
+    return () => { active = false; streamController.current?.abort(); };
+  }, [sessionId]);
   useEffect(() => {
     const element = scrollRef.current;
     if (!element) return;
@@ -161,18 +193,28 @@ function ChatView() {
   async function send(raw: string) {
     const text = raw.trim();
     if (!text || busy) return;
+    const userId = ++nextId.current;
     const assistantId = ++nextId.current;
+    const controller = new AbortController(); streamController.current = controller;
     setInput(""); setBusy(true); setError("");
-    setMessages((old) => [...old, { id: ++nextId.current, role: "user", content: text }, { id: assistantId, role: "assistant", content: "" }]);
+    if (composerRef.current) composerRef.current.style.height = "auto";
+    setMessages((old) => [...old, { id: userId, role: "user", content: text }, { id: assistantId, role: "assistant", content: "" }]);
     try {
-      const response = await fetch(apiUrl("/chat/stream"), { method: "POST", headers: { "Content-Type": "application/json", ...(localStorage.getItem("orbit-token") ? { Authorization: `Bearer ${localStorage.getItem("orbit-token")}` } : {}) }, body: JSON.stringify({ session_id: session.current, message: text }) });
-      if (!response.ok || !response.body) throw new Error("Unable to get a response. Please try again.");
+      const response = await fetch(apiUrl("/chat/stream"), { method: "POST", headers: requestHeaders({ headers: { "Content-Type": "application/json" } }), body: JSON.stringify({ session_id: sessionId, message: text }), signal: controller.signal });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({})) as ApiErrorPayload;
+        const detail = Array.isArray(payload.detail) ? payload.detail.map((item) => item.msg).filter(Boolean).join(" · ") : payload.detail;
+        if (response.status === 401) clearSession();
+        throw new ApiRequestError(detail || `Unable to get a response (${response.status}).`, response.status);
+      }
+      if (!response.body) throw new Error("Streaming is unavailable for this response.");
       const reader = response.body.getReader(); const decoder = new TextDecoder(); let answer = "";
       while (true) {
+        let timeoutId = 0;
         const chunk = await Promise.race([
           reader.read(),
-          new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error("Unable to get a response. Please try again.")), 30000)),
-        ]);
+          new Promise<never>((_, reject) => { timeoutId = window.setTimeout(() => { void reader.cancel(); reject(new Error("Orbit response timed out. Please try again.")); }, 30000); }),
+        ]).finally(() => window.clearTimeout(timeoutId));
         if (chunk.done) break;
         answer += decoder.decode(chunk.value, { stream: true });
         setMessages((old) => old.map((item) => item.id === assistantId ? { ...item, content: answer } : item));
@@ -180,12 +222,15 @@ function ChatView() {
       answer += decoder.decode();
       if (!answer.trim()) throw new Error("Unable to get a response. Please try again.");
     } catch (caught) {
-      const message = caught instanceof Error && caught.message !== "Failed to fetch"
+      if (caught instanceof DOMException && caught.name === "AbortError") return;
+      const message = caught instanceof ApiRequestError
         ? caught.message
-        : "Unable to get a response. Please try again.";
+        : caught instanceof Error && caught.message !== "Failed to fetch"
+          ? caught.message
+          : "Orbit could not connect. Check your connection and try again.";
       setError(message);
       setMessages((old) => old.map((item) => item.id === assistantId ? { ...item, content: message, error: true } : item));
-    } finally { setBusy(false); }
+    } finally { if (streamController.current === controller) streamController.current = null; setBusy(false); }
   }
 
   return <div className="chat-view">
@@ -194,13 +239,16 @@ function ChatView() {
       <div className="model-pill"><span className="pulse" /> Orbit AI <span className="chevron">⌄</span></div>
     </header>
     {!messages.length ? <div className="chat-empty">
-      <div className="hero-icon"><span>✦</span></div><p className="kicker">ORBIT AI ENGINEERING PLATFORM</p>
-      <h2>Build with intelligence.</h2><p className="empty-copy">One calm workspace to chat, retrieve, automate, and evaluate with confidence.</p>
-      <div className="prompt-grid">{["Explain retrieval augmented generation", "Help me design an API", "Review a product brief"].map((item) => <button key={item} onClick={() => void send(item)}><span>{item}</span><b>↗</b></button>)}</div>
-      <div className="capability-row"><span>⌁ Grounded answers</span><span>◌ Streaming responses</span><span>◈ Local-first</span></div>
-    </div> : <div ref={scrollRef} className="message-list">{messages.map((message) => <div className={`message ${message.role}`} key={message.id}><div className="message-avatar">{message.role === "assistant" ? "✦" : "Y"}</div><div className="message-body"><div className="message-label">{message.role === "assistant" ? "Orbit" : "You"} <span>{message.role === "assistant" ? "AI assistant" : "Just now"}</span></div><div className={`message-content ${message.error ? "message-error" : ""}`}>{message.content ? (message.role === "assistant" ? <ResponseErrorBoundary><FormattedResponse content={message.content} /></ResponseErrorBoundary> : message.content) : <><span className="thinking-dot" /><span className="thinking-dot" /><span className="thinking-dot" /></>}</div></div></div>)}</div>}
+      <section className="chat-landing">
+        <div className="landing-hero">
+          <div className="landing-copy"><p className="kicker">YOUR AI WORKSPACE</p><h2>Ideas move<br /><span>faster here.</span></h2><p className="empty-copy">Ask a question, bring in your own knowledge, or turn a rough thought into a clear next step.</p><div className="landing-trust"><span><i>✓</i> Answers can use your files</span><span><i>↗</i> Responses stream live</span></div></div>
+          <div className="orbit-art" aria-hidden="true"><div className="orbit-glow" /><div className="orbit-ring ring-one" /><div className="orbit-ring ring-two" /><div className="orbit-ring ring-three" /><div className="orbit-core">✦</div><span className="orbit-node node-one">✧</span><span className="orbit-node node-two">◈</span><span className="orbit-node node-three">●</span><span className="orbit-caption">THINK · CONNECT · CREATE</span></div>
+        </div>
+        <div className="prompt-section"><div className="prompt-heading"><div><p className="eyebrow">GET STARTED</p><h3>Pick a starting point</h3></div><span>Or ask anything below</span></div><div className="prompt-grid">{[{ icon: "⌕", title: "Explore an idea", text: "Explain retrieval augmented generation" }, { icon: "⌘", title: "Solve a problem", text: "Help me design a clean API" }, { icon: "✎", title: "Shape a draft", text: "Review a product brief" }].map((item) => <button key={item.title} onClick={() => void send(item.text)}><span className="prompt-icon">{item.icon}</span><span className="prompt-text"><strong>{item.title}</strong><small>{item.text}</small></span><b aria-hidden="true">↗</b></button>)}</div></div>
+      </section>
+    </div> : <div ref={scrollRef} className="message-list">{messages.map((message) => <div className={`message ${message.role}`} key={message.id}><div className="message-avatar">{message.role === "assistant" ? "✦" : (localStorage.getItem("orbit-name") || "Y").slice(0, 1).toUpperCase()}</div><div className="message-body"><div className="message-label">{message.role === "assistant" ? "Orbit" : (localStorage.getItem("orbit-name") || "You")} <span>{message.role === "assistant" ? "AI assistant" : "Just now"}</span></div><div className={`message-content ${message.error ? "message-error" : ""}`}>{message.content ? (message.role === "assistant" ? <ResponseErrorBoundary><FormattedResponse content={message.content} /></ResponseErrorBoundary> : message.content) : <><span className="thinking-dot" /><span className="thinking-dot" /><span className="thinking-dot" /></>}</div></div></div>)}</div>}
     {error && <StatusMessage state="error" error={error} />}
-    <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input); }}><textarea aria-label="Message Orbit" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder="Ask Orbit anything…" rows={1} disabled={busy} /><button aria-label="Send message" type="submit" disabled={busy || !input.trim()}>↑</button></form>
+    <form className="chat-composer" onSubmit={(event) => { event.preventDefault(); void send(input); }}><textarea ref={composerRef} aria-label="Message Orbit" value={input} onChange={(event) => { setInput(event.target.value); event.currentTarget.style.height = "auto"; event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 120)}px`; }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder="Ask Orbit anything…" rows={1} disabled={busy} /><button aria-label="Send message" type="submit" disabled={busy || !input.trim()}>↑</button></form>
     <p className="fine-print">Enter to send · Shift + Enter for a new line · AI output should be reviewed</p>
   </div>;
 }
@@ -221,7 +269,7 @@ function ResumeView() {
   const [resume, setResume] = useState(""); const [job, setJob] = useState(""); const [result, setResult] = useState<{ score: number; matched_skills: string[]; missing_skills: string[]; recommendations: string[] }>(); const [state, setState] = useState<LoadState>("idle"); const [error, setError] = useState("");
   async function analyze() { setState("loading"); setError(""); try { const data = await api<NonNullable<typeof result>>("/api/resume/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ resume, job_description: job }) }); setResult(data); setState("success"); } catch (caught) { setError(caught instanceof Error ? caught.message : "Analysis failed."); setState("error"); } }
   async function analyzeFile(file: File) { setState("loading"); setError(""); try { const form = new FormData(); form.append("file", file); form.append("job_description", job); const data = await api<NonNullable<typeof result>>("/api/resume/analyze-file", { method: "POST", body: form }); setResult(data); setState("success"); } catch (caught) { setError(caught instanceof Error ? caught.message : "Analysis failed."); setState("error"); } }
-  return <div className="view"><ViewHeading title="Resume lab" subtitle="Turn a resume and job description into a focused, actionable review." /><div className="two-col"><Card><label>Upload PDF resume<input type="file" accept=".pdf,application/pdf" onChange={(event) => event.target.files?.[0] && void analyzeFile(event.target.files[0])} /></label><label>Resume text<textarea className="large-input" value={resume} onChange={(event) => setResume(event.target.value)} placeholder="Paste resume text here…" /></label><label>Job description <span className="muted">(optional)</span><textarea className="large-input short" value={job} onChange={(event) => setJob(event.target.value)} placeholder="Paste the role requirements…" /></label><button className="button primary full" disabled={!resume.trim() || state === "loading"} onClick={() => void analyze()}>{state === "loading" ? "Analyzing…" : "Analyze resume"}</button><StatusMessage state={state === "error" ? "error" : state} error={error} success="Analysis complete." /></Card>{result ? <Card className="result-panel"><div className="score-ring"><b>{result.score}</b><span>match score</span></div><h3>Strengths</h3><div className="tag-list">{result.matched_skills.map((skill) => <span className="tag green" key={skill}>{skill}</span>)}</div><h3>Opportunities</h3><div className="tag-list">{result.missing_skills.length ? result.missing_skills.map((skill) => <span className="tag amber" key={skill}>{skill}</span>) : <span className="muted">No obvious skill gaps.</span>}</div><h3>Recommendations</h3><ul className="clean-list">{result.recommendations.map((item) => <li key={item}>{item}</li>)}</ul></Card> : <Card className="empty-panel"><div className="hero-icon small">▧</div><h3>Your review will appear here</h3><p>We’ll identify signals, gaps and next steps.</p></Card>}</div></div>;
+  return <div className="view"><ViewHeading title="Resume lab" subtitle="Turn a resume and job description into a focused, actionable review." /><div className="two-col"><Card><label>Upload PDF resume<input type="file" accept=".pdf,application/pdf" onChange={(event) => { const file = event.target.files?.[0]; if (file) void analyzeFile(file); event.currentTarget.value = ""; }} /></label><label>Resume text<textarea className="large-input" value={resume} onChange={(event) => setResume(event.target.value)} placeholder="Paste resume text here…" /></label><label>Job description <span className="muted">(optional)</span><textarea className="large-input short" value={job} onChange={(event) => setJob(event.target.value)} placeholder="Paste the role requirements…" /></label><button className="button primary full" disabled={!resume.trim() || state === "loading"} onClick={() => void analyze()}>{state === "loading" ? "Analyzing…" : "Analyze resume"}</button><StatusMessage state={state === "error" ? "error" : state} error={error} success="Analysis complete." /></Card>{result ? <Card className="result-panel"><div className="score-ring"><b>{result.score}%</b><span>match score</span></div><h3>Strengths</h3><div className="tag-list">{result.matched_skills.map((skill) => <span className="tag green" key={skill}>{skill}</span>)}</div><h3>Opportunities</h3><div className="tag-list">{result.missing_skills.length ? result.missing_skills.map((skill) => <span className="tag amber" key={skill}>{skill}</span>) : <span className="muted">No obvious skill gaps.</span>}</div><h3>Recommendations</h3><ul className="clean-list">{result.recommendations.map((item) => <li key={item}>{item}</li>)}</ul></Card> : <Card className="empty-panel"><div className="hero-icon small">▧</div><h3>Your review will appear here</h3><p>We’ll identify signals, gaps and next steps.</p></Card>}</div></div>;
 }
 
 function ContentView() {
@@ -231,9 +279,9 @@ function ContentView() {
 }
 
 function ResearchView() {
-  const [question, setQuestion] = useState(""); const [answer, setAnswer] = useState<{ answer: string; depth: string; sources: { title?: string; url?: string }[] }>(); const [state, setState] = useState<LoadState>("idle"); const [error, setError] = useState("");
+  const [question, setQuestion] = useState(""); const [answer, setAnswer] = useState<{ answer: string; depth: string; status?: string; sources: { title?: string; url?: string; content?: string }[] }>(); const [state, setState] = useState<LoadState>("idle"); const [error, setError] = useState("");
   async function research() { setState("loading"); setError(""); try { const data = await api<NonNullable<typeof answer>>("/api/research", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ question, depth: "standard" }) }); setAnswer(data); setState("success"); } catch (caught) { setError(caught instanceof Error ? caught.message : "Research failed."); setState("error"); } }
-  return <div className="view"><ViewHeading title="Research" subtitle="Structure a research brief before you go deeper into primary sources." /><Card><label>Research question<input value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="What do you want to understand?" /></label><button className="button primary" disabled={!question.trim() || state === "loading"} onClick={() => void research()}>{state === "loading" ? "Structuring…" : "Start brief"}</button><StatusMessage state={state === "error" ? "error" : state} error={error} success="Brief ready." /></Card>{answer && <Card className="output-card"><span className="eyebrow">STANDARD BRIEF</span><p className="research-answer">{answer.answer}</p>{answer.sources.length ? <div className="source-list"><h3>Sources</h3>{answer.sources.map((source) => <p key={source.url || source.title}>{source.title || source.url}</p>)}</div> : <div className="notice">No web sources connected. Validate findings against current primary sources.</div>}</Card>}</div>;
+  return <div className="view"><ViewHeading title="Research" subtitle="Search the web and review the source material behind every brief." /><Card><label>Research question<input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => event.key === "Enter" && !event.shiftKey && void research()} placeholder="What do you want to understand?" /></label><button className="button primary" disabled={!question.trim() || state === "loading"} onClick={() => void research()}>{state === "loading" ? "Researching…" : "Start research"}</button><StatusMessage state={state === "error" ? "error" : state} error={error} success={answer?.status === "ready" ? "Research complete." : undefined} /></Card>{answer && <Card className="output-card"><div className="card-heading"><div><span className="eyebrow">{(answer.depth || "standard").toUpperCase()} BRIEF</span><h3>Research summary</h3></div><span className={`research-status ${answer.status === "ready" ? "ready" : "unavailable"}`}>{answer.status === "ready" ? "Sources found" : "Research unavailable"}</span></div><p className="research-answer">{answer.answer}</p>{answer.sources.length ? <div className="source-list"><h3>Sources <span className="muted">· {answer.sources.length}</span></h3><div className="research-sources">{answer.sources.map((source) => <article className="research-source" key={source.url || source.title}>{source.url && /^https?:\/\//i.test(source.url) ? <a href={source.url} target="_blank" rel="noreferrer">{source.title || source.url}<span>Open source ↗</span></a> : <strong>{source.title || "Source"}</strong>}<p>{source.content || source.url}</p></article>)}</div></div> : <div className="notice">This brief has no linked sources. Check the research service status and verify claims independently.</div>}</Card>}</div>;
 }
 
 function AgentsView() {
@@ -258,19 +306,60 @@ function Metric({ label, value, detail, icon }: { label: string; value?: number 
 function SettingsView() {
   const [health, setHealth] = useState<Health>();
   const [state, setState] = useState<LoadState>("loading");
-  useEffect(() => { void api<Health>("/health").then((data) => { setHealth(data); setState("success"); }).catch(() => setState("error")); }, []);
-  return <div className="view"><ViewHeading title="System status" subtitle="Live configuration reported by the Orbit API." /><StatusMessage state={state} error="Could not reach the health endpoint." success="Health data is current." /><Card className="settings-list"><div><strong>API status</strong><span className={health?.status === "ok" ? "status-value good" : "status-value warning"}>{health?.status || "Unavailable"}</span></div><div><strong>Environment</strong><span>{health?.environment || "—"}</span></div><div><strong>Database</strong><span className="status-value">{health?.database || "—"}</span></div><div><strong>Cache</strong><span className="status-value">{health?.redis || "—"}</span></div><div><strong>Model</strong><span>{health?.gemini_model || "—"}</span></div></Card><p className="settings-note">Connection details come from the backend health endpoint. Secrets stay on the server.</p></div>;
+  const refresh = () => { setState("loading"); void api<Health>("/health").then((data) => { setHealth(data); setState("success"); }).catch(() => { setHealth(undefined); setState("error"); }); };
+  useEffect(refresh, []);
+  const cacheUnavailable = health?.redis === "unavailable";
+  const cacheLabel = health?.redis === "disabled" ? "Local fallback" : health?.redis || (state === "loading" ? "Checking" : "Unavailable");
+  return <div className="view">
+    <ViewHeading title="System status" subtitle="See which parts of the Orbit service are responding." action={<button className="button subtle" onClick={refresh} disabled={state === "loading"}>{state === "loading" ? "Checking…" : "Refresh status"}</button>} />
+    <div className="service-grid">
+      <Card className="service-card"><span className={`service-indicator ${health ? "good" : "bad"}`} /><div><small>API</small><strong>{health ? "Reachable" : state === "loading" ? "Checking" : "Unavailable"}</strong><p>{health ? "The backend health endpoint responded." : "The frontend could not reach the backend."}</p></div></Card>
+      <Card className="service-card"><span className={`service-indicator ${health?.database === "ready" ? "good" : "warn"}`} /><div><small>DATABASE</small><strong>{health?.database || (state === "loading" ? "Checking" : "Unavailable")}</strong><p>{health?.database === "ready" ? "Persistent storage is ready." : "Storage may limit sign-in and saved data."}</p></div></Card>
+      <Card className="service-card"><span className={`service-indicator ${cacheUnavailable ? "warn" : health ? "good" : "bad"}`} /><div><small>CACHE</small><strong>{cacheLabel}</strong><p>{health?.redis === "disabled" ? "Local rate limiting is active; Redis is optional." : cacheUnavailable ? "Redis is unavailable; the backend uses local fallback." : "Cache state reported by the backend."}</p></div></Card>
+    </div>
+    <Card className="settings-list"><div><strong>Environment</strong><span>{health?.environment || "—"}</span></div><div><strong>Model</strong><span>{health?.gemini_model || "—"}</span></div></Card>
+    <p className="settings-note">Credentials and model keys stay on the server. A database warning does not necessarily mean the API is offline.</p>
+  </div>;
 }
 function ViewHeading({ title, subtitle, action }: { title: string; subtitle: string; action?: ReactNode }) { return <header className="view-heading"><div><p className="eyebrow">ORBIT WORKSPACE</p><h2>{title}</h2><p>{subtitle}</p></div>{action}</header>; }
 function Empty({ text }: { text: string }) { return <div className="empty"><span>◇</span><p>{text}</p></div>; }
 
 export default function App() {
-  const [page, setPage] = useState<Page>("chat"); const [mobileOpen, setMobileOpen] = useState(false); const [authenticated, setAuthenticated] = useState(() => Boolean(localStorage.getItem("orbit-token"))); const [health, setHealth] = useState<Health>();
-  useEffect(() => { void api<Health>("/health").then(setHealth).catch(() => setHealth(undefined)); }, [authenticated]);
-  if (!authenticated) return <LoginView onAuthenticated={() => setAuthenticated(true)} />;
-  const render = { chat: <ChatView />, knowledge: <KnowledgeView />, resume: <ResumeView />, content: <ContentView />, research: <ResearchView />, agents: <AgentsView />, evaluation: <EvaluationView />, analytics: <AnalyticsView />, settings: <SettingsView /> }[page];
-  const userName = localStorage.getItem("orbit-name") || "Orbit user";
-  const systemLabel = health ? (health.status === "ok" ? "API connected" : "API degraded") : "API unavailable";
-  const signOut = () => { localStorage.removeItem("orbit-token"); localStorage.removeItem("orbit-name"); setAuthenticated(false); };
-  return <div className="app-shell"><aside className={`sidebar ${mobileOpen ? "open" : ""}`}><div className="brand"><span className="brand-mark">✦</span><div>orbit<span>AI ENGINEERING</span></div></div><button className="new-chat" onClick={() => { setPage("chat"); setMobileOpen(false); }}>＋ <span>Open conversation</span></button>{["Workspace", "Create", "Automate", "Operate", "System"].map((group) => <div className="nav-group" key={group}><p>{group}</p>{modules.filter((item) => item.group === group).map((item) => <button aria-current={page === item.id ? "page" : undefined} className={page === item.id ? "nav-item active" : "nav-item"} key={item.id} onClick={() => { setPage(item.id); setMobileOpen(false); }}><span>{item.icon}</span>{item.label}{item.id === "analytics" && <i>Live</i>}</button>)}</div>)}<div className="sidebar-footer"><span className={health?.status === "ok" ? "online" : "offline"} /><div><strong>{health?.status === "ok" ? "Orbit is ready" : "Check connection"}</strong><small>{health?.environment || "Backend status pending"}</small></div></div></aside><main className="main"><header className="topbar"><button className="mobile-menu" aria-label="Toggle navigation" onClick={() => setMobileOpen(!mobileOpen)}>☰</button><div className="breadcrumb"><span>Workspace</span><b>/</b> {modules.find((item) => item.id === page)?.label}</div><div className="topbar-actions"><span className={`top-status ${health?.status === "ok" ? "connected" : "disconnected"}`}><span className={health?.status === "ok" ? "online" : "offline"} />{systemLabel}</span><div className="profile"><span>{userName.slice(0, 1).toUpperCase()}</span><b>{userName}</b></div><button className="signout-button" onClick={signOut}>Sign out</button></div></header><div key={page} className="content page-enter">{render}</div></main></div>;
+  const [page, setPage] = useState<Page>("chat"); const [mobileOpen, setMobileOpen] = useState(false); const [chatSessionId, setChatSessionId] = useState(() => localStorage.getItem("orbit-session") || `session-${crypto.randomUUID()}`); const [authState, setAuthState] = useState<"checking" | "signed-in" | "signed-out">(() => localStorage.getItem("orbit-token") ? "checking" : "signed-out"); const [authNotice, setAuthNotice] = useState(""); const [health, setHealth] = useState<Health>(); const [userName, setUserName] = useState(() => localStorage.getItem("orbit-name") || "");
+  useEffect(() => {
+    const onExpired = () => { setAuthState("signed-out"); setUserName(""); setChatSessionId(`session-${crypto.randomUUID()}`); setAuthNotice("Your session expired. Sign in again to continue."); };
+    window.addEventListener("orbit:session-expired", onExpired);
+    if (localStorage.getItem("orbit-token")) {
+      void api("/api/observability/metrics").then(() => setAuthState("signed-in")).catch((error) => {
+        if (error instanceof ApiRequestError && error.status === 401) onExpired();
+        else setAuthState("signed-in");
+      });
+    } else setAuthState("signed-out");
+    const refreshHealth = () => { void api<Health>("/health").then(setHealth).catch(() => setHealth(undefined)); };
+    refreshHealth();
+    const healthTimer = window.setInterval(refreshHealth, 30000);
+    return () => { window.clearInterval(healthTimer); window.removeEventListener("orbit:session-expired", onExpired); };
+  }, []);
+  const startConversation = () => {
+    const nextSession = `session-${crypto.randomUUID()}`;
+    setChatSessionId(nextSession); localStorage.setItem("orbit-session", nextSession);
+    setPage("chat"); setMobileOpen(false);
+  };
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (authState === "signed-in" && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k" && !["INPUT", "TEXTAREA", "SELECT"].includes(target?.tagName || "") && !target?.isContentEditable) {
+        event.preventDefault(); startConversation();
+      }
+      if (event.key === "Escape") setMobileOpen(false);
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, [authState, chatSessionId]);
+  if (authState === "checking") return <main className="auth-loading"><span className="brand-mark">✦</span><span className="spinner" />Restoring your workspace…</main>;
+  if (authState === "signed-out") return <LoginView notice={authNotice} onAuthenticated={(name) => { setUserName(name); setAuthNotice(""); setAuthState("signed-in"); }} />;
+  const render = { chat: <ChatView sessionId={chatSessionId} />, knowledge: <KnowledgeView />, resume: <ResumeView />, content: <ContentView />, research: <ResearchView />, agents: <AgentsView />, evaluation: <EvaluationView />, analytics: <AnalyticsView />, settings: <SettingsView /> }[page];
+  const displayName = userName || "Orbit user";
+  const signOut = () => { localStorage.removeItem("orbit-token"); localStorage.removeItem("orbit-name"); localStorage.removeItem("orbit-session"); setChatSessionId(`session-${crypto.randomUUID()}`); setUserName(""); setAuthNotice(""); setAuthState("signed-out"); };
+  return <div className="app-shell"><aside className={`sidebar ${mobileOpen ? "open" : ""}`}><div className="brand"><span className="brand-mark">✦</span><div>orbit<span>AI ENGINEERING</span></div></div><button className="new-chat" onClick={startConversation}>＋ <span>New conversation</span><kbd>Ctrl K</kbd></button>{["Workspace", "Create", "Automate", "Operate", "System"].map((group) => <div className="nav-group" key={group}><p>{group}</p>{modules.filter((item) => item.group === group).map((item) => <button aria-current={page === item.id ? "page" : undefined} className={page === item.id ? "nav-item active" : "nav-item"} key={item.id} onClick={() => { setPage(item.id); setMobileOpen(false); }}><span>{item.icon}</span>{item.label}</button>)}</div>)}<div className="sidebar-footer"><span className={health ? "online" : "offline"} /><div><strong>{health ? "API is reachable" : "API unavailable"}</strong><small>{health?.database === "ready" ? "Database ready" : health ? "Database needs attention" : "Retry from system status"}</small></div></div></aside><main className="main"><header className="topbar"><button className="mobile-menu" aria-label="Toggle navigation" onClick={() => setMobileOpen(!mobileOpen)}>☰</button><div className="breadcrumb"><span>Workspace</span><b>/</b> {modules.find((item) => item.id === page)?.label}</div><div className="topbar-actions"><span className={`top-status ${health ? "connected" : "disconnected"}`}><span className={health ? "online" : "offline"} />{health ? "API online" : "API offline"}</span><div className="profile"><span>{displayName.slice(0, 1).toUpperCase()}</span><b>{displayName}</b></div><button className="signout-button" onClick={signOut}>Sign out</button></div></header><div key={page} className="content page-enter">{render}</div></main></div>;
 }
