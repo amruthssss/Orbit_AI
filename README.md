@@ -95,7 +95,7 @@ The repository includes `render.yaml` for the FastAPI service and `frontend/verc
 2. In Vercel, use `frontend/` as the project root and set `VITE_API_URL` to the Render API origin, with no trailing slash.
 3. Deploy the backend, confirm `/health/ready`, then deploy the frontend and test sign-in, uploads, search, and chat.
 
-Current public links: [Orbit AI frontend](https://orbit-ai-nine-pi.vercel.app/) · [Render API health](https://orbit-ai-efzz.onrender.com/health). On 2026-10-14 the frontend returned HTTP 200, while Render reported `status=degraded` and `database=error`; `/health/ready` was not present on that deployment. This checkout's production deployment has not yet been confirmed.
+Current public links: [Orbit AI frontend](https://orbit-ai-nine-pi.vercel.app/) · [Render API health](https://orbit-ai-efzz.onrender.com/health). After commit `dd8f3cf` was pushed, Vercel served a new frontend bundle. Render still reported `status=degraded` and `database=error`, and `/health/ready` returned 404, so hosted sign-in, upload, search, and chat are not verified yet.
 
 ## Reports
 

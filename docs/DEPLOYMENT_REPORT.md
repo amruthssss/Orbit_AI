@@ -2,6 +2,8 @@
 
 **Checked:** 2026-10-14
 
+The repair commit `dd8f3cf` was pushed to `main`. Vercel subsequently served a new JavaScript bundle containing the updated registration UI. Render still served its previous API version at the checks below.
+
 ## Configuration prepared
 
 - Added `render.yaml` for the root FastAPI service, production environment, generated signing secret, externally supplied database/API settings, and `/health/ready` check.
@@ -13,11 +15,11 @@
 
 | URL | Observed result |
 |---|---|
-| [Vercel frontend](https://orbit-ai-nine-pi.vercel.app/) | HTTP 200; returned an HTML document. Its published JavaScript bundle contains the existing Render API origin, but this does not prove API calls succeed. |
+| [Vercel frontend](https://orbit-ai-nine-pi.vercel.app/) | HTTP 200; the published bundle includes the updated registration password hint and the existing Render API origin. This does not prove API calls succeed. |
 | [Render `/health`](https://orbit-ai-efzz.onrender.com/health) | HTTP 200; JSON reported `status=degraded` and `database=error`. Redis mode was reported as `upstash-rest`; a Redis round trip was not verified. |
 | [Render `/health/ready`](https://orbit-ai-efzz.onrender.com/health/ready) | HTTP 404 on the currently deployed service; it has not yet deployed this checkout's readiness route. |
 
-The live frontend and API are therefore not end-to-end healthy. No live login, upload, retrieval, or chat test was possible with the database degraded. A production API key was not read or transmitted.
+The frontend update is live, but the live frontend and API are not end-to-end healthy. Render has not served this checkout's new readiness route yet, and its database is degraded. No live login, upload, retrieval, or chat test was possible. A production API key was not read or transmitted.
 
 ## Required provider actions
 
