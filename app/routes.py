@@ -1,11 +1,12 @@
 """Versioned API routers for platform modules."""
 from __future__ import annotations
 import time
+from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from app.schemas import (AuthRequest, ChatRequest, DocumentCreate, EvaluationRequest,
                          GenerateRequest, ResumeRequest, ResearchRequest, SearchRequest,
                          WorkflowRequest)
-from app.services import (analyze_resume, chunks, evaluate, extract_document_text,
+from app.services import (EmbeddingProviderError, analyze_resume, chunks, evaluate, extract_document_text,
                           generate_content, hash_password, research, retrieve, run_workflow,
                           verify_password)
 from app.storage import (
@@ -24,6 +25,7 @@ from app.storage import (
 )
 from app.dependencies import current_user
 from app.security import AuthenticationError, create_access_token
+from app.config import settings
 
 api = APIRouter(prefix="/api")
 auth = APIRouter(prefix="/auth", tags=["auth"])
@@ -34,6 +36,8 @@ observability = APIRouter(prefix="/observability", tags=["observability"])
 
 @auth.post("/register")
 def register(request: AuthRequest):
+    if len(request.password) < 8:
+        raise HTTPException(422, "Password must be at least 8 characters long.")
     try:
         user = create_user(request.email, request.name, hash_password(request.password))
     except DuplicateUser:
@@ -65,8 +69,11 @@ def login(request: AuthRequest):
 
 @knowledge.post("/documents")
 def upload_document(request: DocumentCreate, user: dict | None = Depends(current_user)):
-    item = add_document(request.name, request.text, request.collection, len(chunks(request.text)),
-                        user["id"] if user else None)
+    try:
+        item = add_document(request.name, request.text, request.collection, len(chunks(request.text)),
+                            user["id"] if user else None)
+    except EmbeddingProviderError as exc:
+        raise HTTPException(503, str(exc)) from exc
     return {"document": item}
 
 
@@ -75,18 +82,34 @@ async def upload_document_file(file: UploadFile = File(...), collection: str = "
                                user: dict | None = Depends(current_user)):
     if not file.filename:
         raise HTTPException(400, "A document file is required.")
-    if not file.filename.lower().endswith((".pdf", ".txt", ".md", ".json", ".csv", ".docx")):
+    allowed_types = {
+        ".pdf": {"application/pdf", "application/octet-stream"},
+        ".docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/octet-stream"},
+        ".txt": {"text/plain", "application/octet-stream"},
+        ".md": {"text/markdown", "text/plain", "application/octet-stream"},
+        ".json": {"application/json", "text/plain", "application/octet-stream"},
+        ".csv": {"text/csv", "application/vnd.ms-excel", "text/plain", "application/octet-stream"},
+    }
+    suffix = Path(file.filename).suffix.lower()
+    if suffix not in allowed_types:
         raise HTTPException(415, "Supported files are PDF, DOCX, TXT, MD, JSON, and CSV.")
-    content = await file.read()
+    if file.content_type and file.content_type.lower() not in allowed_types[suffix]:
+        raise HTTPException(415, "The uploaded file type does not match its extension.")
+    max_bytes = settings.upload_max_bytes
+    content = await file.read(max_bytes + 1)
     await file.close()
-    if len(content) > 10_000_000:
-        raise HTTPException(413, "Document exceeds the 10 MB upload limit.")
+    if len(content) > max_bytes:
+        raise HTTPException(413, f"Document exceeds the {max_bytes // 1_000_000} MB upload limit.")
     try:
         text = extract_document_text(file.filename, content)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    return {"document": add_document(file.filename, text, collection, len(chunks(text)),
-                                     user["id"] if user else None)}
+    try:
+        document = add_document(file.filename, text, collection, len(chunks(text)),
+                                user["id"] if user else None)
+    except EmbeddingProviderError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return {"document": document}
 
 
 @knowledge.get("/documents")
@@ -105,10 +128,13 @@ def get_document_endpoint(document_id: str, user: dict | None = Depends(current_
 @knowledge.put("/documents/{document_id}")
 def update_document_endpoint(document_id: str, request: DocumentCreate,
                              user: dict | None = Depends(current_user)):
-    document = update_document(
-        document_id, request.name, request.text, request.collection, len(chunks(request.text)),
-        user["id"] if user else None
-    )
+    try:
+        document = update_document(
+            document_id, request.name, request.text, request.collection, len(chunks(request.text)),
+            user["id"] if user else None
+        )
+    except EmbeddingProviderError as exc:
+        raise HTTPException(503, str(exc)) from exc
     if document is None:
         raise HTTPException(404, "Document not found.")
     return {"document": document}
@@ -123,8 +149,11 @@ def delete_document_endpoint(document_id: str, user: dict | None = Depends(curre
 
 @knowledge.post("/search")
 def search_documents(request: SearchRequest, user: dict | None = Depends(current_user)):
-    return {"results": retrieve(request.query, request.collection, request.limit,
-                                user["id"] if user else None)}
+    try:
+        return {"results": retrieve(request.query, request.collection, request.limit,
+                                    user["id"] if user else None)}
+    except EmbeddingProviderError as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @tools.post("/resume/analyze")

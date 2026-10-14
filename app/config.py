@@ -21,6 +21,11 @@ class Settings:
     )
     cors_origins: str = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:8000")
     rate_limit: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+    rag_chunk_size: int = int(os.getenv("RAG_CHUNK_SIZE", "900"))
+    rag_chunk_overlap: int = int(os.getenv("RAG_CHUNK_OVERLAP", "120"))
+    rag_top_k: int = int(os.getenv("RAG_TOP_K", "5"))
+    rag_min_score: float = float(os.getenv("RAG_MIN_SCORE", "0.4"))
+    upload_max_bytes: int = int(os.getenv("UPLOAD_MAX_BYTES", "10000000"))
     environment: str = os.getenv("ENVIRONMENT", "development")
     testing: bool = os.getenv("TESTING", "").lower() in {"1", "true", "yes"}
 

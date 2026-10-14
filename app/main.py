@@ -12,6 +12,7 @@ from app.llm import (
     clear_conversation,
     generate_response,
     generate_stream,
+    provider_available,
 )
 from app.routes import api
 from app.schemas import ChatRequest, ChatResponse
@@ -20,6 +21,7 @@ from app.dependencies import current_user
 from app.storage import session_belongs_to
 from app.cache import allow_request, cache_status
 import time
+import uuid
 
 init_db()
 app = FastAPI(title="Orbit AI Engineering Platform", version="2.0.0",
@@ -29,7 +31,6 @@ allowed_origins = {
     for origin in settings.cors_origins.split(",")
     if origin.strip()
 }
-allowed_origins.add("https://orbit-ai-nine-pi.vercel.app")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=sorted(allowed_origins),
@@ -50,6 +51,16 @@ async def rate_limit(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def request_id(request: Request, call_next):
+    supplied = request.headers.get("x-request-id", "").strip()
+    request_id_value = supplied[:100] if supplied and all(c.isalnum() or c in "-_" for c in supplied) else str(uuid.uuid4())
+    request.state.request_id = request_id_value
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id_value
+    return response
+
+
 @app.get("/health", tags=["system"])
 def health():
     database = storage_status()
@@ -61,6 +72,14 @@ def health():
         "redis": cache_status()["mode"],
         "gemini_model": settings.gemini_model,
     }
+
+
+@app.get("/health/ready", tags=["system"])
+def readiness():
+    database = storage_status()
+    if database != "ready":
+        return JSONResponse(status_code=503, content={"status": "not_ready", "database": database})
+    return {"status": "ready", "database": database}
 
 
 @app.get("/")
@@ -119,6 +138,9 @@ def chat_stream(request: ChatRequest, user: dict | None = Depends(current_user))
     valid, reason = check_input(request.message)
     if not valid:
         raise HTTPException(status_code=400, detail=reason)
+    if settings.environment.lower() == "production" and not provider_available():
+        detail = "Gemini is not configured." if not settings.gemini_api_key else "Gemini client is unavailable."
+        raise HTTPException(status_code=503, detail=detail)
     def tracked_stream():
         start = time.perf_counter()
         try:

@@ -1,0 +1,65 @@
+{
+  "dataset_id": "orbit-rag-golden-v1",
+  "mode": "deterministic lexical retrieval (TESTING=1; no Gemini calls)",
+  "k": 5,
+  "case_count": 3,
+  "answerable_case_count": 2,
+  "unanswerable_case_count": 1,
+  "metrics": {
+    "hit_rate_at_5": 1.0,
+    "recall_at_5": 1.0,
+    "mean_reciprocal_rank_at_5": 1.0,
+    "context_precision_at_5": 1.0,
+    "unanswerable_rejection_accuracy": 1.0,
+    "mean_retrieval_latency_ms": 0.868
+  },
+  "not_measured": [
+    "answer faithfulness",
+    "answer relevance",
+    "LLM-generated citation accuracy",
+    "real Gemini embeddings"
+  ],
+  "cases": [
+    {
+      "id": "beacon-color",
+      "answerable": true,
+      "retrieved": [
+        {
+          "document_id": "dda329bd-2b05-4653-992c-f06ece4ff6b0",
+          "chunk_id": 1,
+          "chunk": 0,
+          "score": 0.6,
+          "name": "orbit-handbook.txt"
+        }
+      ],
+      "relevant_ranks": [
+        1
+      ],
+      "latency_ms": 1.841
+    },
+    {
+      "id": "relay-location",
+      "answerable": true,
+      "retrieved": [
+        {
+          "document_id": "dda329bd-2b05-4653-992c-f06ece4ff6b0",
+          "chunk_id": 1,
+          "chunk": 0,
+          "score": 0.8,
+          "name": "orbit-handbook.txt"
+        }
+      ],
+      "relevant_ranks": [
+        1
+      ],
+      "latency_ms": 0.438
+    },
+    {
+      "id": "unsupported-launch-site",
+      "answerable": false,
+      "retrieved": [],
+      "relevant_ranks": [],
+      "latency_ms": 0.325
+    }
+  ]
+}

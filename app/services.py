@@ -4,58 +4,86 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import math
 import re
 import secrets
 import requests
 
 from pypdf import PdfReader
-from pypdf.errors import PdfReadError
 
 from app.config import settings
-from app.storage import documents, document_chunks_table, documents_table, transaction
+from app.storage import document_chunks_table, documents_table, transaction
 from sqlalchemy import select
 
+logger = logging.getLogger(__name__)
 
-def chunks(text: str, size: int = 900, overlap: int = 120) -> list[str]:
-    words = text.split()
+
+def chunks(text: str, size: int | None = None, overlap: int | None = None) -> list[str]:
+    size = size or settings.rag_chunk_size
+    overlap = settings.rag_chunk_overlap if overlap is None else overlap
+    if size < 1 or overlap < 0 or overlap >= size:
+        raise ValueError("Chunk size must be positive and overlap must be smaller than chunk size.")
+    words = " ".join(text.split()).split()
     result = []
     start = 0
     while start < len(words):
         result.append(" ".join(words[start:start + size]))
+        if start + size >= len(words):
+            break
         start += max(1, size - overlap)
-    return result or [""]
+    return result
 
 
 def extract_document_text(filename: str, content: bytes) -> str:
     """Extract text from supported uploads without inventing document content."""
-    if filename.lower().endswith(".pdf"):
+    suffix = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+    if suffix == "pdf":
         import io
 
+        if not content.startswith(b"%PDF-"):
+            raise ValueError("The uploaded content is not a PDF file.")
         try:
             reader = PdfReader(io.BytesIO(content))
-        except PdfReadError as exc:
+        except Exception as exc:
             raise ValueError("Unable to read this PDF file.") from exc
         text = "\n".join(page.extract_text() or "" for page in reader.pages).strip()
-    elif filename.lower().endswith(".docx"):
+    elif suffix == "docx":
         import io
         from docx import Document
 
-        document = Document(io.BytesIO(content))
+        if not content.startswith(b"PK\x03\x04"):
+            raise ValueError("The uploaded content is not a DOCX file.")
+        try:
+            document = Document(io.BytesIO(content))
+        except Exception as exc:
+            raise ValueError("Unable to read this DOCX file.") from exc
         text = "\n".join(paragraph.text for paragraph in document.paragraphs).strip()
     else:
-        text = content.decode("utf-8", errors="replace").strip()
+        try:
+            text = content.decode("utf-8").strip()
+        except UnicodeDecodeError as exc:
+            raise ValueError("Text documents must use UTF-8 encoding.") from exc
+        if "\x00" in text:
+            raise ValueError("Text documents cannot contain binary data.")
+        if suffix == "json":
+            try:
+                json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError("The JSON document is malformed.") from exc
     if not text:
         raise ValueError("The document contains no extractable text.")
     return text
 
 
-def retrieve(query: str, collection: str = "default", limit: int = 5,
+def retrieve(query: str, collection: str = "default", limit: int | None = None,
              owner_id: str | None = None) -> list[dict]:
     """Retrieve persisted chunks using Gemini cosine similarity when available."""
+    limit = limit or settings.rag_top_k
     query_embedding = embed_texts([query])[0]
     if query_embedding:
         query_stmt = select(
+                    document_chunks_table.c.id,
                     document_chunks_table.c.document_id,
                     document_chunks_table.c.chunk_index,
                     document_chunks_table.c.text,
@@ -78,7 +106,7 @@ def retrieve(query: str, collection: str = "default", limit: int = 5,
                 score = None
             if score is not None:
                 scored.append({
-                    "document_id": row["document_id"], "chunk": row["chunk_index"],
+                    "chunk_id": row["id"], "document_id": row["document_id"], "chunk": row["chunk_index"],
                     "score": round(score, 3), "text": row["text"],
                 })
         if scored:
@@ -97,19 +125,32 @@ def retrieve(query: str, collection: str = "default", limit: int = 5,
                 }
             for item in scored:
                 item["name"] = names.get(item["document_id"], "Unknown document")
-            return sorted(scored, key=lambda item: item["score"], reverse=True)[:limit]
+            return [item for item in sorted(scored, key=lambda item: item["score"], reverse=True)
+                    if item["score"] >= settings.rag_min_score][:limit]
 
     # Provider unavailable: retain the inspectable lexical baseline.
     terms = set(re.findall(r"[a-z0-9]{3,}", query.lower()))
     found = []
-    for doc in documents(collection, owner_id):
-        for index, part in enumerate(chunks(doc["text"])):
-            words = re.findall(r"[a-z0-9]{3,}", part.lower())
-            score = sum(1 for term in terms if term in words) / max(len(terms), 1)
-            if score:
-                found.append({"document_id": doc["id"], "name": doc["name"], "chunk": index,
-                              "score": round(score, 3), "text": part[:1200]})
-    return sorted(found, key=lambda item: item["score"], reverse=True)[:limit]
+    query_stmt = select(
+        document_chunks_table.c.id, document_chunks_table.c.document_id,
+        document_chunks_table.c.chunk_index, document_chunks_table.c.text,
+        documents_table.c.name,
+    ).join(documents_table, document_chunks_table.c.document_id == documents_table.c.id).where(
+        documents_table.c.collection == collection
+    )
+    if owner_id is not None:
+        query_stmt = query_stmt.where(documents_table.c.owner_id == owner_id)
+    with transaction() as db:
+        rows = db.execute(query_stmt).mappings().all()
+    for row in rows:
+        words = re.findall(r"[a-z0-9]{3,}", row["text"].lower())
+        score = sum(1 for term in terms if term in words) / max(len(terms), 1)
+        if score:
+            found.append({"chunk_id": row["id"], "document_id": row["document_id"],
+                          "name": row["name"], "chunk": row["chunk_index"],
+                          "score": round(score, 3), "text": row["text"][:1200]})
+    return [item for item in sorted(found, key=lambda item: item["score"], reverse=True)
+            if item["score"] >= settings.rag_min_score][:limit]
 
 
 def cosine_similarity(left: list[float], right: list[float] | None) -> float | None:
@@ -128,17 +169,36 @@ def embed_texts(texts: list[str]) -> list[list[float] | None]:
     try:
         from app.llm import client
         if client is None:
-            return [None for _ in texts]
-        response = client.models.embed_content(model=settings.embedding_model, contents=texts)
-        embeddings = getattr(response, "embeddings", None) or []
+            raise EmbeddingProviderError("Gemini embedding client is unavailable.")
         values: list[list[float] | None] = []
-        for embedding in embeddings:
-            vector = getattr(embedding, "values", None)
-            values.append([float(value) for value in vector] if vector else None)
-        return (values + [None] * len(texts))[:len(texts)]
-    except Exception:
-        # Retrieval must remain useful if credentials, quotas, or API versions fail.
-        return [None for _ in texts]
+        dimensions = None
+        for offset in range(0, len(texts), 64):
+            batch = texts[offset:offset + 64]
+            response = client.models.embed_content(model=settings.embedding_model, contents=batch)
+            embeddings = getattr(response, "embeddings", None) or []
+            if len(embeddings) != len(batch):
+                raise EmbeddingProviderError("Gemini returned an incomplete embedding response.")
+            for embedding in embeddings:
+                vector = getattr(embedding, "values", None)
+                if not vector:
+                    raise EmbeddingProviderError("Gemini returned an empty embedding.")
+                parsed = [float(value) for value in vector]
+                if not all(math.isfinite(value) for value in parsed):
+                    raise EmbeddingProviderError("Gemini returned an invalid embedding.")
+                if dimensions is not None and dimensions != len(parsed):
+                    raise EmbeddingProviderError("Gemini returned inconsistent embedding dimensions.")
+                dimensions = len(parsed)
+                values.append(parsed)
+        return values
+    except Exception as exc:
+        if isinstance(exc, EmbeddingProviderError):
+            raise
+        logger.error("Gemini embedding request failed (%s).", type(exc).__name__)
+        raise EmbeddingProviderError("Gemini embeddings are temporarily unavailable.") from exc
+
+
+class EmbeddingProviderError(RuntimeError):
+    """A configured embedding provider did not return valid vectors."""
 
 
 def analyze_resume(resume: str, job_description: str = "") -> dict:

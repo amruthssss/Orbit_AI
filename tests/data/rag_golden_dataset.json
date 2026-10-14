@@ -1,0 +1,37 @@
+{
+  "dataset_id": "orbit-rag-golden-v1",
+  "documents": [
+    {
+      "id": "orbit-handbook",
+      "name": "orbit-handbook.txt",
+      "collection": "golden",
+      "text": "Orbit handbook. The Orbit beacon is cobalt blue. The relay station is located on Europa. The backup battery lasts twelve hours."
+    }
+  ],
+  "cases": [
+    {
+      "id": "beacon-color",
+      "question": "What color is the Orbit beacon?",
+      "expected_document_ids": ["orbit-handbook"],
+      "expected_evidence": ["The Orbit beacon is cobalt blue."],
+      "expected_answer_facts": ["cobalt blue"],
+      "answerable": true
+    },
+    {
+      "id": "relay-location",
+      "question": "Where is the relay station located?",
+      "expected_document_ids": ["orbit-handbook"],
+      "expected_evidence": ["The relay station is located on Europa."],
+      "expected_answer_facts": ["Europa"],
+      "answerable": true
+    },
+    {
+      "id": "unsupported-launch-site",
+      "question": "What does the handbook say about launching a submarine from Iceland?",
+      "expected_document_ids": [],
+      "expected_evidence": [],
+      "expected_answer_facts": [],
+      "answerable": false
+    }
+  ]
+}

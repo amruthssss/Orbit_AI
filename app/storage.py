@@ -1,8 +1,7 @@
 """Transactional persistence for the application.
 
-PostgreSQL is required whenever ``DATABASE_URL`` is configured.  SQLite is
-available only for tests that explicitly set ``TESTING=1`` and uses a shared
-in-memory database, so production cannot silently create a local database.
+PostgreSQL can be used for hosted deployments. File-backed SQLite is available
+for explicit local development, while tests use a shared in-memory database.
 """
 from __future__ import annotations
 
@@ -116,9 +115,6 @@ def _engine_url() -> str | None:
     url = settings.database_url
     if not url:
         return None
-    if url.startswith("sqlite:"):
-        # A file-backed SQLite URL is never accepted outside explicit tests.
-        return None
     if url.startswith("postgres://"):
         return "postgresql+psycopg://" + url.removeprefix("postgres://")
     if url.startswith("postgresql://"):
@@ -142,6 +138,8 @@ def _get_engine() -> Engine:
                 connect_args={"check_same_thread": False},
                 poolclass=StaticPool,
             )
+        elif url.startswith("sqlite:"):
+            _engine = create_engine(url, connect_args={"check_same_thread": False})
         else:
             connect_args = {"sslmode": "require"} if "supabase" in url or "pooler" in url else {}
             _engine = create_engine(url, pool_pre_ping=True, connect_args=connect_args)
@@ -212,6 +210,18 @@ def now() -> str:
 def add_document(name: str, text: str, collection: str, chunks: int,
                  owner_id: str | None = None) -> dict:
     from app.services import chunks as chunk_text, embed_texts
+
+    predicate = (documents_table.c.name == name) & (documents_table.c.collection == collection) & (documents_table.c.text == text)
+    if owner_id is not None:
+        predicate = predicate & (documents_table.c.owner_id == owner_id)
+    with transaction() as db:
+        existing = db.execute(select(
+            documents_table.c.id, documents_table.c.name, documents_table.c.collection,
+            documents_table.c.chunks, func.length(documents_table.c.text).label("characters"),
+            documents_table.c.created_at,
+        ).where(predicate)).mappings().first()
+    if existing:
+        return dict(existing)
 
     parts = chunk_text(text)
     embeddings = embed_texts(parts)

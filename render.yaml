@@ -1,0 +1,37 @@
+services:
+  - type: web
+    name: orbit-ai-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health/ready
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.6-flash
+      - key: GEMINI_EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: CORS_ORIGINS
+        sync: false
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: RAG_CHUNK_SIZE
+        value: "900"
+      - key: RAG_CHUNK_OVERLAP
+        value: "120"
+      - key: RAG_TOP_K
+        value: "5"
+      - key: RAG_MIN_SCORE
+        value: "0.4"
+      - key: UPLOAD_MAX_BYTES
+        value: "10000000"
