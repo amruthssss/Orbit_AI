@@ -24,7 +24,7 @@
 
 - Backend tests and TypeScript/Vite production build are run after the last source changes and recorded in `TEST_REPORT.md`.
 - Local FastAPI `/health` and `/health/ready` both returned HTTP 200 with SQLite ready. Vite served the application and proxied `/health` successfully.
-- Gemini SDK import succeeded after installing the project's pinned `google-genai` package into the active Python environment. The user's API key was not read or displayed; real Gemini calls were not made.
+- Gemini SDK and DOCX extraction imports succeeded after installing those declared dependencies into the active Python environment. The separate Python 3.12 virtual environment could not install dependencies because pip's certificate validation to PyPI failed. The user's API key was not read or displayed; real Gemini calls were not made.
 
 ## Known implementation limits
 

@@ -16,6 +16,10 @@
 
 The tests cover the active SQLite-backed API in `TESTING=1` mode. Gemini behavior is mocked for the citation-flow test; there were no live Gemini, PostgreSQL, Redis, Tavily, Render, or Vercel write/deploy tests. The user's local browser displayed the sign-in screen after an expired session; no credentials were entered.
 
+## Environment note
+
+The repository `.venv` uses Python 3.12, but `pip install -r requirements.txt` in that environment failed because pip could not verify the local TLS issuer for PyPI. TLS verification was not bypassed. The passing backend runs used the active global Miniconda Python 3.13.9 environment, which already had the app's core dependencies; `python-docx` and the project's pinned `google-genai` version were installed there so the newly covered extraction/SDK imports could run. A clean Python 3.12 dependency install was not verified. `npm ci` was not run because the existing `frontend/node_modules` was available; `npm run build` passed against that install.
+
 ## Added coverage
 
 - PDF, TXT, and DOCX text extraction plus malformed, empty, and no-extractable-text documents.
