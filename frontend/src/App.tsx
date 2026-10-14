@@ -4,6 +4,8 @@ import type { ReactNode } from "react";
 type Page = "chat" | "knowledge" | "resume" | "content" | "research" | "agents" | "evaluation" | "analytics" | "settings";
 type Message = { id: number; role: "user" | "assistant"; content: string; error?: boolean };
 type DocumentItem = { id: string; name: string; collection: string; chunks: number; characters: number; created_at: string };
+type RagSource = { id: string; name: string; chunk: number; score: number; excerpt: string };
+type RagAnswer = { answer: string; grounded: boolean; sources: RagSource[] };
 type LoadState = "idle" | "loading" | "success" | "error";
 type Health = { status: string; environment: string; database: string; redis: string; gemini_model: string };
 type ApiErrorPayload = { detail?: string | { msg?: string }[] };
@@ -35,7 +37,7 @@ function apiUrl(path: string): string {
 
 const modules: { id: Page; label: string; icon: string; group: string }[] = [
   { id: "chat", label: "Chat", icon: "✦", group: "Workspace" },
-  { id: "knowledge", label: "Knowledge base", icon: "▤", group: "Workspace" },
+  { id: "knowledge", label: "RAG", icon: "▤", group: "Workspace" },
   { id: "resume", label: "Resume lab", icon: "▧", group: "Create" },
   { id: "content", label: "Content studio", icon: "✎", group: "Create" },
   { id: "research", label: "Research", icon: "⌕", group: "Automate" },
@@ -247,14 +249,78 @@ function ChatView({ sessionId }: { sessionId: string }) {
 
 function KnowledgeView() {
   const [docs, setDocs] = useState<DocumentItem[]>([]);
-  const [query, setQuery] = useState(""); const [results, setResults] = useState<{ name: string; text: string; score: number }[]>([]);
-  const [state, setState] = useState<LoadState>("loading"); const [error, setError] = useState(""); const [uploading, setUploading] = useState(false);
-  async function refresh() { setState("loading"); try { const data = await api<{ documents: DocumentItem[] }>("/api/knowledge/documents"); setDocs(data.documents); setState("success"); } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to load documents."); setState("error"); } }
+  const [query, setQuery] = useState("");
+  const [answer, setAnswer] = useState<RagAnswer | null>(null);
+  const [state, setState] = useState<LoadState>("loading");
+  const [askState, setAskState] = useState<LoadState>("idle");
+  const [error, setError] = useState("");
+  const [askError, setAskError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [asking, setAsking] = useState(false);
+  const [ragStatus, setRagStatus] = useState<{ gemini_configured: boolean; embedding_model: string; vector_storage: string }>();
+  async function refresh() {
+    setState("loading"); setError("");
+    try {
+      const [documentData, statusData] = await Promise.all([
+        api<{ documents: DocumentItem[] }>("/api/knowledge/documents"),
+        api<NonNullable<typeof ragStatus>>("/api/knowledge/status"),
+      ]);
+      setDocs(documentData.documents.filter((document) => document.name.toLowerCase().endsWith(".pdf"))); setRagStatus(statusData); setState("success");
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to load the PDF library."); setState("error"); }
+  }
   useEffect(() => { void refresh(); }, []);
-  async function upload(file: File) { setUploading(true); setError(""); try { const form = new FormData(); form.append("file", file); await api("/api/knowledge/documents/upload", { method: "POST", body: form }); await refresh(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to upload document."); } finally { setUploading(false); } }
-  async function remove(documentId: string) { setError(""); try { await api(`/api/knowledge/documents/${documentId}`, { method: "DELETE" }); await refresh(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to delete document."); } }
-  async function search() { if (!query.trim()) return; setState("loading"); setError(""); try { const data = await api<{ results: typeof results }>("/api/knowledge/search", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ query }) }); setResults(data.results); setState("success"); } catch (caught) { setError(caught instanceof Error ? caught.message : "Search failed."); setState("error"); } }
-  return <div className="view"><ViewHeading title="Knowledge base" subtitle="Ground answers in your own documents with lightweight local retrieval." action={<label className={`button primary ${uploading ? "is-loading" : ""}`}>＋ {uploading ? "Uploading…" : "Add document"}<input type="file" hidden accept=".pdf,.docx,.txt,.md,.json,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,application/json,text/csv" onChange={(event) => event.target.files?.[0] && void upload(event.target.files[0])} /></label>} /><Card><div className="search-row"><div className="input-with-icon">⌕<input aria-label="Search indexed knowledge" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.key === "Enter" && void search()} placeholder="Search indexed knowledge…" /></div><button className="button" onClick={() => void search()} disabled={!query.trim() || state === "loading"}>Search</button></div><StatusMessage state={state === "error" ? "error" : results.length ? "success" : "idle"} error={error} success={results.length ? `Retrieved ${results.length} matching source${results.length === 1 ? "" : "s"}.` : undefined} />{results.length > 0 && <div className="result-list"><div className="result-heading">Retrieved context <span>{results.length} matches</span></div>{results.map((result) => <div className="result" key={result.name + result.text}><div><strong>{result.name}</strong><small>match {Math.round(result.score * 100)}%</small></div><p>{result.text}</p><span className="source-chip">Source · indexed document</span></div>)}</div>}</Card><div className="section-title">Indexed documents <span>{docs.length}</span></div><Card className="table-card">{state === "loading" && !docs.length ? <StatusMessage state="loading" /> : docs.length ? docs.map((doc) => <div className="table-row" key={doc.id}><span className="file-icon">▤</span><div><strong>{doc.name}</strong><small>{doc.collection} · {doc.chunks} chunks</small></div><span className="muted">{doc.characters.toLocaleString()} chars</span><button className="button subtle" onClick={() => void remove(doc.id)}>Delete</button></div>) : <Empty text="No documents yet. Upload a PDF, DOCX, or text file to create your first collection." />}</Card></div>;
+  async function upload(file: File) {
+    setUploading(true); setError(""); setAnswer(null); setAskError("");
+    try {
+      const form = new FormData(); form.append("file", file);
+      await api("/api/knowledge/documents/upload", { method: "POST", body: form });
+      await refresh();
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to index this PDF."); }
+    finally { setUploading(false); }
+  }
+  async function remove(documentId: string) {
+    setError(""); setAnswer(null);
+    try { await api(`/api/knowledge/documents/${documentId}`, { method: "DELETE" }); await refresh(); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to remove this PDF."); }
+  }
+  async function ask() {
+    if (!query.trim() || asking || !docs.length) return;
+    setAsking(true); setAskState("loading"); setAskError(""); setAnswer(null);
+    try {
+      const data = await api<RagAnswer>("/api/knowledge/ask", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: query.trim(), limit: 5 }),
+      });
+      setAnswer(data); setAskState("success");
+    } catch (caught) {
+      setAskError(caught instanceof Error ? caught.message : "Unable to answer from the PDFs."); setAskState("error");
+    } finally { setAsking(false); }
+  }
+  return <div className="view rag-view">
+    <ViewHeading title="RAG" subtitle="Upload PDFs, index their chunks as vectors, then ask questions grounded only in those files." action={<span className={`rag-provider ${ragStatus?.gemini_configured ? "ready" : "needs-key"}`}><i />{ragStatus ? ragStatus.gemini_configured ? "Gemini ready" : "Gemini key needed" : "Checking Gemini…"}</span>} />
+    <div className="rag-layout">
+      <div className="rag-left-column">
+        <Card className="rag-upload-card"><div className="rag-card-heading"><div><p className="eyebrow">SOURCE LIBRARY</p><h3>Add a PDF</h3><p>Text is split into overlapping chunks and embedded for semantic retrieval.</p></div><span className="rag-card-icon">↥</span></div>
+          <label className={`rag-upload-button ${uploading ? "is-loading" : ""}`}><span>{uploading ? <span className="spinner" /> : "＋"}</span>{uploading ? "Indexing PDF…" : "Choose a PDF"}<input type="file" hidden accept=".pdf,application/pdf" disabled={uploading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void upload(file); event.currentTarget.value = ""; }} /></label>
+          <p className="rag-upload-note">PDF files only · up to 10 MB · scanned PDFs need selectable text</p>
+          {error && <StatusMessage state="error" error={error} />}
+        </Card>
+        <Card className="rag-library-card"><div className="rag-library-heading"><div><p className="eyebrow">READY FOR RETRIEVAL</p><h3>Your PDFs</h3></div><span className="rag-count">{docs.length}</span></div>
+          {state === "loading" && !docs.length ? <StatusMessage state="loading" /> : docs.length ? <div className="rag-document-list">{docs.map((doc) => <div className="rag-document" key={doc.id}><span className="rag-file-icon">▤</span><div className="rag-document-copy"><strong title={doc.name}>{doc.name}</strong><small>{doc.chunks} chunks · {doc.characters.toLocaleString()} characters</small></div><button className="rag-remove" aria-label={`Remove ${doc.name}`} title="Remove PDF" onClick={() => void remove(doc.id)}>×</button></div>)}</div> : <div className="rag-empty-library"><span>▤</span><p>Your indexed PDFs will appear here.</p></div>}
+        </Card>
+        <div className={`rag-index-status ${ragStatus?.gemini_configured ? "ready" : "needs-key"}`}><span className="rag-index-dot" /><div><strong>{ragStatus?.gemini_configured ? "Vector embeddings enabled" : "Add your Gemini API key"}</strong><small>{ragStatus?.gemini_configured ? `Embeddings: ${ragStatus.embedding_model} · vectors persist in the database` : "Set GEMINI_API_KEY in the backend .env, restart the API, then re-upload existing PDFs to create vectors."}</small></div></div>
+      </div>
+      <Card className="rag-ask-card"><div className="rag-card-heading"><div><p className="eyebrow">PDF-ONLY ANSWERS</p><h3>Ask your documents</h3><p>Orbit will use retrieved PDF passages and cite the source chunks.</p></div><span className="rag-card-icon ask">⌕</span></div>
+        <label className="rag-query-label" htmlFor="rag-question">Your question<textarea id="rag-question" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void ask(); } }} placeholder={!docs.length ? "Upload a PDF to start asking questions…" : !ragStatus?.gemini_configured ? "Add your Gemini API key to ask your PDFs…" : "Ask something the PDFs can answer…"} disabled={!docs.length || asking || !ragStatus?.gemini_configured} /></label>
+        <div className="rag-examples"><span>Try:</span>{["Summarize the main points", "What numbers are mentioned?"].map((example) => <button key={example} type="button" onClick={() => setQuery(example)} disabled={!docs.length || asking || !ragStatus?.gemini_configured}>{example}</button>)}</div>
+        <button className="button primary rag-ask-button" onClick={() => void ask()} disabled={!query.trim() || !docs.length || asking || !ragStatus?.gemini_configured}>{asking ? <><span className="spinner" />Searching your PDFs…</> : <>Ask PDFs <span>↑</span></>}</button>
+        {askError && <StatusMessage state="error" error={askError} />}
+        {askState === "loading" && <div className="rag-answer-placeholder"><span className="spinner" />Reading relevant PDF chunks…</div>}
+        {answer && <section className={`rag-answer ${answer.grounded ? "grounded" : "not-found"}`} aria-live="polite"><div className="rag-answer-heading"><span className="rag-answer-check">{answer.grounded ? "✦" : "i"}</span><div><p className="eyebrow">{answer.grounded ? "GROUNDED RESPONSE" : "NO SUPPORTING PASSAGE"}</p><h4>{answer.grounded ? "Answer" : "Not found in your PDFs"}</h4></div></div><div className="rag-answer-body"><ResponseErrorBoundary><FormattedResponse content={answer.answer} /></ResponseErrorBoundary></div>{answer.sources.length > 0 && <div className="rag-citations"><p>Retrieved PDF chunks <span>{answer.sources.length}</span></p>{answer.sources.map((source) => <details className="rag-source" key={source.id}><summary><span>{source.id}</span><strong>{source.name}</strong><small>Chunk {source.chunk} · {Math.round(source.score * 100)}% match</small></summary><p>{source.excerpt}</p></details>)}</div>}</section>}
+        {!answer && askState === "idle" && <div className="rag-answer-placeholder"><span>✦</span>{ragStatus?.gemini_configured ? "Answers stay within your uploaded PDFs. If a passage does not support an answer, Orbit will say so." : "Configure the Gemini key in the backend to create PDF embeddings and generate grounded answers."}</div>}
+      </Card>
+    </div>
+  </div>;
 }
 
 function ResumeView() {

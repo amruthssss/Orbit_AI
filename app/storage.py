@@ -221,6 +221,24 @@ def add_document(name: str, text: str, collection: str, chunks: int,
             documents_table.c.created_at,
         ).where(predicate)).mappings().first()
     if existing:
+        # A document may have been saved before Gemini was configured. On an
+        # idempotent re-upload, fill any missing vectors without duplicating it.
+        if settings.gemini_api_key and not settings.testing:
+            with transaction() as db:
+                pending = db.execute(select(
+                    document_chunks_table.c.id,
+                    document_chunks_table.c.text,
+                ).where(
+                    (document_chunks_table.c.document_id == existing["id"])
+                    & (document_chunks_table.c.embedding.is_(None))
+                ).order_by(document_chunks_table.c.chunk_index)).mappings().all()
+            vectors = embed_texts([row["text"] for row in pending]) if pending else []
+            if vectors and all(vector is not None for vector in vectors):
+                with transaction() as db:
+                    for row, vector in zip(pending, vectors):
+                        db.execute(update(document_chunks_table).where(
+                            document_chunks_table.c.id == row["id"]
+                        ).values(embedding=json.dumps(vector)))
         return dict(existing)
 
     parts = chunk_text(text)

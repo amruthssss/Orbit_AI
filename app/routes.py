@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from app.schemas import (AuthRequest, ChatRequest, DocumentCreate, EvaluationRequest,
                          GenerateRequest, ResumeRequest, ResearchRequest, SearchRequest,
                          WorkflowRequest)
-from app.services import (EmbeddingProviderError, analyze_resume, chunks, evaluate, extract_document_text,
+from app.services import (EmbeddingProviderError, RAGAnswerError, analyze_resume, ask_pdfs, chunks, evaluate, extract_document_text,
                           generate_content, hash_password, research, retrieve, run_workflow,
                           verify_password)
 from app.storage import (
@@ -20,6 +20,7 @@ from app.storage import (
     list_documents,
     record_usage,
     save_evaluation,
+    storage_status,
     update_document,
     usage_summary,
 )
@@ -115,6 +116,27 @@ async def upload_document_file(file: UploadFile = File(...), collection: str = "
 @knowledge.get("/documents")
 def get_documents(collection: str = "default", user: dict | None = Depends(current_user)):
     return {"documents": list_documents(collection, user["id"] if user else None)}
+
+
+@knowledge.get("/status")
+def knowledge_status():
+    from app.llm import provider_available
+
+    return {
+        "database": storage_status(),
+        "gemini_configured": bool(settings.gemini_api_key and provider_available()),
+        "embedding_model": settings.embedding_model,
+        "vector_storage": "persistent database index",
+    }
+
+
+@knowledge.post("/ask")
+def ask_documents(request: SearchRequest, user: dict | None = Depends(current_user)):
+    try:
+        return ask_pdfs(request.query, request.collection, request.limit,
+                        user["id"] if user else None)
+    except (EmbeddingProviderError, RAGAnswerError) as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @knowledge.get("/documents/{document_id}")
